@@ -1,9 +1,24 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chess Life</title>
+
+  <!-- Cross-Origin Isolation pour SharedArrayBuffer (Stockfish WASM) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/coi-serviceworker.js').then(() => {
+        if (!crossOriginIsolated) location.reload();
+      });
+    }
+  </script>
+
+  <!-- DaisyUI 5 (composants) + Tailwind CSS 4 (utilitaires) -->
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/daisyui.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <!-- Styles spécifiques au projet -->
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/ui.css">
 </head>
@@ -11,16 +26,20 @@
 
   <div id="app">
 
+    <!-- ── SIDEBAR GAUCHE ── -->
     <div id="sidebar">
+
       <div id="player-info">
         <div class="label">Ton Elo</div>
         <div id="player-elo">1200</div>
       </div>
+
       <div id="opponent-info">
         <div class="label">Adversaire</div>
         <div id="opponent-name">—</div>
         <div id="opponent-elo">—</div>
       </div>
+
       <div id="focus-section">
         <div class="label">Focus</div>
         <div id="focus-bar-wrap">
@@ -28,6 +47,7 @@
         </div>
         <div id="focus-value">100%</div>
       </div>
+
       <div id="stockfish-section">
         <div class="label">Analyse Stockfish</div>
         <button class="sf-btn" id="btn-sf1">Niveau 1 — feu vert/rouge (-8%)</button>
@@ -35,12 +55,15 @@
         <button class="sf-btn" id="btn-sf3">Niveau 3 — variation 3 coups (-30%)</button>
         <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
       </div>
+
       <div id="game-controls">
         <button id="btn-new-game">Nouvelle partie</button>
         <div id="game-status">Lance une partie pour commencer.</div>
       </div>
+
     </div>
 
+    <!-- ── ÉCHIQUIER CENTRE ── -->
     <div id="board-section">
       <div id="captured-black"></div>
       <div id="board-container">
@@ -49,6 +72,7 @@
       <div id="captured-white"></div>
     </div>
 
+    <!-- ── HISTORIQUE DROITE ── -->
     <div id="move-history">
       <div class="label">Historique</div>
       <div id="moves-list"></div>
@@ -56,9 +80,19 @@
 
   </div>
 
+  <!-- ── MODAL DE PROMOTION (DaisyUI dialog) ── -->
+  <dialog id="promotion-modal" class="modal">
+    <div class="modal-box bg-base-200 border border-primary/30 text-center">
+      <h3 class="text-lg font-bold mb-4 text-base-content">Promotion — choisissez la pièce</h3>
+      <div id="promotion-choices" class="flex gap-4 justify-center"></div>
+    </div>
+  </dialog>
+
+  <!-- ── SCRIPTS ── -->
   <script src="lib/chess.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/chess-engine.js"></script>
+  <script src="js/ui-manager.js"></script>
 
 </body>
 </html>

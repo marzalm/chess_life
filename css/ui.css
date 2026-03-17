@@ -184,34 +184,13 @@
 }
 
 /* ── PROMOTION ── */
-
-#promotion-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-#promotion-modal.hidden {
-  display: none;
-}
-
-#promotion-choices {
-  background: #16213e;
-  border: 2px solid #2a5298;
-  border-radius: 12px;
-  padding: 20px;
-  display: flex;
-  gap: 16px;
-}
+/* Le modal est géré par DaisyUI <dialog> — seuls les styles des pièces restent ici */
 
 .promo-piece {
   font-size: 56px;
   cursor: pointer;
   transition: transform 0.1s;
+  line-height: 1;
 }
 
 .promo-piece:hover {
