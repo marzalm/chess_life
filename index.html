@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Life</title>
+  <link rel="stylesheet" href="css/board.css">
+  <link rel="stylesheet" href="css/ui.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <div id="sidebar">
+      <div id="player-info">
+        <div class="label">Ton Elo</div>
+        <div id="player-elo">1200</div>
+      </div>
+      <div id="opponent-info">
+        <div class="label">Adversaire</div>
+        <div id="opponent-name">—</div>
+        <div id="opponent-elo">—</div>
+      </div>
+      <div id="focus-section">
+        <div class="label">Focus</div>
+        <div id="focus-bar-wrap">
+          <div id="focus-bar"></div>
+        </div>
+        <div id="focus-value">100%</div>
+      </div>
+      <div id="stockfish-section">
+        <div class="label">Analyse Stockfish</div>
+        <button class="sf-btn" id="btn-sf1">Niveau 1 — feu vert/rouge (-8%)</button>
+        <button class="sf-btn" id="btn-sf2">Niveau 2 — meilleur coup adverse (-18%)</button>
+        <button class="sf-btn" id="btn-sf3">Niveau 3 — variation 3 coups (-30%)</button>
+        <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
+      </div>
+      <div id="game-controls">
+        <button id="btn-new-game">Nouvelle partie</button>
+        <div id="game-status">Lance une partie pour commencer.</div>
+      </div>
+    </div>
+
+    <div id="board-section">
+      <div id="captured-black"></div>
+      <div id="board-container">
+        <div id="board"></div>
+      </div>
+      <div id="captured-white"></div>
+    </div>
+
+    <div id="move-history">
+      <div class="label">Historique</div>
+      <div id="moves-list"></div>
+    </div>
+
+  </div>
+
+  <script src="lib/chess.js"></script>
+  <script src="js/focus-system.js"></script>
+  <script src="js/chess-engine.js"></script>
+
+</body>
+</html>
