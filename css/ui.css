@@ -196,3 +196,225 @@
 .promo-piece:hover {
   transform: scale(1.15);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   DASHBOARD
+════════════════════════════════════════════════════════════════ */
+
+#screen-dashboard {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px 64px;
+  background: #0f0f1a;
+}
+
+.dashboard-wrap {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── En-tête ── */
+
+.dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dash-name {
+  font-size: 28px;
+  font-weight: 800;
+  color: #f0f0f0;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.dash-meta {
+  font-size: 13px;
+  color: #666;
+  margin: 4px 0 0;
+}
+
+.dash-elo-box {
+  background: #16213e;
+  border: 1px solid #2a5298;
+  border-radius: 10px;
+  padding: 10px 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.dash-elo-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #666;
+  display: block;
+}
+
+.dash-elo-value {
+  font-size: 36px;
+  font-weight: 900;
+  color: #e0e0e0;
+  line-height: 1.1;
+}
+
+/* ── Stats DaisyUI ── */
+
+.dash-stats {
+  border-radius: 10px;
+  overflow: hidden;
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+}
+
+/* ── Compétences ── */
+
+.dash-skills {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dash-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #555;
+  margin: 0 0 4px;
+}
+
+.skill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skill-name {
+  font-size: 13px;
+  color: #aaa;
+  min-width: 80px;
+}
+
+.skill-bar {
+  flex: 1;
+  height: 8px;
+}
+
+.skill-val {
+  font-size: 13px;
+  font-weight: bold;
+  color: #e0e0e0;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ── Actions ── */
+
+.dash-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* ── Historique ── */
+
+.dash-history {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.dash-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.history-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #0f1628;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.history-entry .h-opponent {
+  color: #ccc;
+  font-weight: 600;
+}
+
+.history-entry .h-result-win  { color: #1d9e75; font-weight: bold; }
+.history-entry .h-result-loss { color: #e24b4a; font-weight: bold; }
+.history-entry .h-result-draw { color: #888;    font-weight: bold; }
+
+.history-entry .h-delta-pos { color: #1d9e75; font-size: 12px; }
+.history-entry .h-delta-neg { color: #e24b4a; font-size: 12px; }
+
+.history-empty {
+  font-size: 13px;
+  color: #444;
+  text-align: center;
+  padding: 12px 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   ÉCRAN JEU — bouton retour
+════════════════════════════════════════════════════════════════ */
+
+#screen-game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.back-btn {
+  align-self: flex-start;
+  margin: 12px 16px 0;
+  color: #666;
+}
+
+.back-btn:hover {
+  color: #ccc;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   UTILITAIRE
+════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════
+   FOCUS — tremblement zone épuisée (0-5%)
+════════════════════════════════════════════════════════════════ */
+
+@keyframes board-shake {
+  0%, 100%  { transform: translate(0, 0); }
+  10%       { transform: translate(-1px, 0); }
+  30%       { transform: translate(1px, -1px); }
+  50%       { transform: translate(-1px, 1px); }
+  70%       { transform: translate(1px, 0); }
+  90%       { transform: translate(-1px, -1px); }
+}
+
+#board.focus-exhausted {
+  animation: board-shake 0.15s ease-in-out 10;
+}
+
+.hidden {
+  display: none !important;
+}

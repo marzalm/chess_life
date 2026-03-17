@@ -1,6 +1,6 @@
 // ui-manager.js
 // Rendu DOM et gestion des interactions utilisateur.
-// Communique avec ChessEngine et FocusSystem uniquement via leurs API publiques.
+// Communique avec ChessEngine, FocusSystem et CareerManager via leurs API publiques.
 
 const UIManager = {
 
@@ -10,6 +10,13 @@ const UIManager = {
   legalMoves:       [],
   lastMove:         null,
   pendingPromotion: null,
+
+  // ── ÉTAT STOCKFISH VISUEL ──────────────────────────────────
+  sfEvalActive:     false,   // N1 : mode évaluateur actif
+  sfEvalConsumed:   false,   // N1 : l'unique évaluation a été utilisée
+  sfEvalPending:    null,    // N1 : { from, to } du coup en attente de confirmation
+  sfGuideSquare:    null,    // N2 : case de la pièce à jouer
+  sfArrow:          null,    // N3 : { from, to } de la flèche
 
   PIECES: {
     wK: '♔', wQ: '♕', wR: '♖', wB: '♗', wN: '♘', wP: '♙',
@@ -22,22 +29,106 @@ const UIManager = {
     this._bindButtons();
     this.renderBoard();
     FocusSystem.render();
-    this.showStatus('Lance une partie pour commencer.');
+
+    if (!CareerManager.hasCharacter()) {
+      this._openCharacterCreation();
+    } else {
+      this.showScreen('dashboard');
+    }
+  },
+
+  // ── GESTION DES ÉCRANS ───────────────────────────────────────
+
+  showScreen(name) {
+    document.getElementById('screen-dashboard').classList.toggle('hidden', name !== 'dashboard');
+    document.getElementById('screen-game').classList.toggle('hidden', name !== 'game');
+
+    if (name === 'dashboard') {
+      this.renderDashboard();
+    }
+  },
+
+  // ── DASHBOARD ────────────────────────────────────────────────
+
+  renderDashboard() {
+    const stats = CareerManager.getPublicStats();
+
+    document.getElementById('dash-player-name').textContent = stats.nom;
+    document.getElementById('dash-player-meta').textContent =
+      `${stats.nationalite} · ${stats.styleDeJeu} · Semaine ${stats.semaine}`;
+    document.getElementById('dash-elo').textContent       = stats.elo;
+    document.getElementById('dash-solde').textContent     = stats.solde + ' €';
+    document.getElementById('dash-focus-max').textContent = stats.focusMax + ' %';
+
+    const parties = stats.historiqueParties;
+    document.getElementById('dash-games-count').textContent = parties.length;
+
+    if (parties.length > 0) {
+      const wins   = parties.filter(p => p.result === 'win').length;
+      const draws  = parties.filter(p => p.result === 'draw').length;
+      const losses = parties.length - wins - draws;
+      document.getElementById('dash-record').textContent =
+        `${wins}V · ${draws}N · ${losses}D`;
+    } else {
+      document.getElementById('dash-record').textContent = 'Aucune partie jouée';
+    }
+
+    this._setSkillBar('ouvertures', stats.ouvertures);
+    this._setSkillBar('endgame',    stats.endgame);
+    this._renderRecentHistory(parties);
+  },
+
+  _setSkillBar(key, value) {
+    const bar = document.getElementById('skill-' + key);
+    const val = document.getElementById('skill-' + key + '-val');
+    if (bar) bar.value = value;
+    if (val) val.textContent = value;
+  },
+
+  _renderRecentHistory(parties) {
+    const list = document.getElementById('dash-history-list');
+    list.innerHTML = '';
+
+    const recent = [...parties].reverse().slice(0, 5);
+
+    if (recent.length === 0) {
+      list.innerHTML = '<p class="history-empty">Aucune partie jouée pour l\'instant.</p>';
+      return;
+    }
+
+    const resultLabel = { win: 'Victoire', draw: 'Nulle', loss: 'Défaite' };
+    const resultClass = { win: 'h-result-win', draw: 'h-result-draw', loss: 'h-result-loss' };
+
+    recent.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'history-entry';
+
+      const deltaSign  = p.delta >= 0 ? '+' : '';
+      const deltaClass = p.delta >= 0 ? 'h-delta-pos' : 'h-delta-neg';
+
+      row.innerHTML = `
+        <span class="h-opponent">${p.opponentName} (${p.opponentElo})</span>
+        <span class="${resultClass[p.result]}">${resultLabel[p.result]}</span>
+        <span class="${deltaClass}">${deltaSign}${p.delta} Elo</span>
+      `;
+      list.appendChild(row);
+    });
+  },
+
+  // ── CRÉATION DU PERSONNAGE ────────────────────────────────────
+
+  _openCharacterCreation() {
+    document.getElementById('modal-create-player').showModal();
   },
 
   // ── RENDU DE L'ÉCHIQUIER ─────────────────────────────────────
 
-  /**
-   * Reconstruit entièrement le DOM de l'échiquier.
-   * Lit l'état courant via ChessEngine — ne prend pas de FEN en paramètre
-   * pour rester synchronisé avec la source de vérité.
-   */
   renderBoard() {
     const board = document.getElementById('board');
     board.innerHTML = '';
 
-    const files     = ['a','b','c','d','e','f','g','h'];
-    const ranks     = [8, 7, 6, 5, 4, 3, 2, 1];
+    const files = ['a','b','c','d','e','f','g','h'];
+    const ranks = [8, 7, 6, 5, 4, 3, 2, 1];
 
     const legalTargets   = this.legalMoves.map(m => m.to);
     const captureTargets = this.legalMoves
@@ -57,13 +148,13 @@ const UIManager = {
         el.className      = 'square ' + (isLight ? 'light' : 'dark');
         el.dataset.square = square;
 
-        if (square === this.selectedSquare)                             el.classList.add('selected');
-        if (this.lastMove?.from === square || this.lastMove?.to === square) el.classList.add('last-move');
+        if (square === this.selectedSquare)                                    el.classList.add('selected');
+        if (this.lastMove?.from === square || this.lastMove?.to === square)    el.classList.add('last-move');
         if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
-        if (captureTargets.includes(square))                            el.classList.add('legal-capture');
-        if (inCheck && square === kingSquare)                           el.classList.add('in-check');
+        if (captureTargets.includes(square))                                   el.classList.add('legal-capture');
+        if (inCheck && square === kingSquare)                                  el.classList.add('in-check');
+        if (this.sfGuideSquare === square)                                     el.classList.add('sf-guide');
 
-        // Coordonnées (rang à gauche, colonne en bas)
         if (fi === 0) {
           const r = document.createElement('span');
           r.className   = 'coord-rank';
@@ -77,10 +168,9 @@ const UIManager = {
           el.appendChild(f);
         }
 
-        // Pièce
         if (piece) {
           const p = document.createElement('div');
-          p.className   = 'piece';
+          p.className   = 'piece piece-' + piece.color;
           p.textContent = this.PIECES[piece.color + piece.type.toUpperCase()];
           el.appendChild(p);
         }
@@ -89,14 +179,18 @@ const UIManager = {
         board.appendChild(el);
       });
     });
+
+    // Flèche SVG N3
+    this._renderArrow();
+
+    // N1 : réafficher le badge si un coup est en attente de confirmation
+    if (this.sfEvalPending) {
+      this._showPendingBadge();
+    }
   },
 
   // ── SURBRILLANCES ────────────────────────────────────────────
 
-  /**
-   * Ajoute la classe 'legal-move' à une liste de cases.
-   * @param {string[]} squares - ex: ['e4', 'e5', 'd4']
-   */
   highlightSquares(squares) {
     squares.forEach(sq => {
       const el = document.querySelector(`[data-square="${sq}"]`);
@@ -104,7 +198,6 @@ const UIManager = {
     });
   },
 
-  /** Retire toutes les surbrillances de sélection/coup légal. */
   clearHighlights() {
     document.querySelectorAll('.square').forEach(el => {
       el.classList.remove('legal-move', 'legal-capture', 'selected');
@@ -113,16 +206,11 @@ const UIManager = {
 
   // ── STATUT ET HISTORIQUE ─────────────────────────────────────
 
-  /**
-   * Affiche un message dans la zone de statut.
-   * @param {string} msg
-   */
   showStatus(msg) {
     const el = document.getElementById('game-status');
     if (el) el.textContent = msg;
   },
 
-  /** Reconstruit l'historique des coups dans le panneau droite. */
   updateMoveHistory() {
     const history = ChessEngine.getHistory();
     const list    = document.getElementById('moves-list');
@@ -161,23 +249,38 @@ const UIManager = {
     const piece = ChessEngine.getPiece(square);
     const turn  = ChessEngine.getTurn();
 
-    // Sélectionner une pièce du joueur au trait
+    // ── Clic sur une de ses propres pièces → sélection ──
     if (piece && piece.color === turn) {
       this.selectedSquare = square;
       this.legalMoves     = ChessEngine.getLegalMoves(square);
+      // N2 : effacer la surbrillance guide quand le joueur sélectionne une pièce
+      this.sfGuideSquare  = null;
+      // N1 : effacer le badge en attente (changement de pièce)
+      this.sfEvalPending  = null;
+      // Lancer l'évaluation anticipée pendant que le joueur choisit sa case
+      ChessEngine.prefetchEval();
       this.renderBoard();
       return;
     }
 
-    // Tenter un déplacement si une pièce est sélectionnée
+    // ── Clic sur une case destination ──
     if (this.selectedSquare) {
       const move = this.legalMoves.find(m => m.to === square);
       if (move) {
+        // N1 : si évaluation active et pas encore consommée → évaluer au lieu de jouer
+        if (this.sfEvalActive && !this.sfEvalConsumed) {
+          this.sfEvalConsumed = true;
+          this.sfEvalPending  = { from: move.from, to: move.to };
+          this._evaluateSingleMove(move);
+          return;
+        }
+        // N1 : si on reclique sur la case évaluée → jouer le coup
+        // Sinon (eval consommée, autre case) → jouer normalement
         this._executeMove(move);
       } else {
-        // Clic sur une case non-légale → désélectionner
         this.selectedSquare = null;
         this.legalMoves     = [];
+        this.sfEvalPending  = null;
         this.renderBoard();
       }
     }
@@ -185,10 +288,6 @@ const UIManager = {
 
   // ── PROMOTION ────────────────────────────────────────────────
 
-  /**
-   * Ouvre le modal DaisyUI de promotion.
-   * @param {'w'|'b'} color - couleur du pion en promotion
-   */
   openPromotionModal(color) {
     const modal   = document.getElementById('promotion-modal');
     const choices = document.getElementById('promotion-choices');
@@ -217,7 +316,6 @@ const UIManager = {
 
   // ── LOGIQUE DE JEU ───────────────────────────────────────────
 
-  /** Lance une nouvelle partie. */
   newGame() {
     ChessEngine.reset();
 
@@ -225,9 +323,14 @@ const UIManager = {
     this.legalMoves       = [];
     this.lastMove         = null;
     this.pendingPromotion = null;
+    this._clearStockfishVisuals();
 
     FocusSystem.resetForGame();
 
+    const stats = CareerManager.getPublicStats();
+    document.getElementById('player-elo').textContent   = stats.elo;
+    document.getElementById('opponent-name').textContent = '—';
+    document.getElementById('opponent-elo').textContent  = '—';
     document.getElementById('moves-list').innerHTML = '';
     document.getElementById('sf-feedback').textContent =
       'Active Stockfish pour analyser la position.';
@@ -240,7 +343,6 @@ const UIManager = {
 
   _executeMove(move) {
     if (move.flags.includes('p')) {
-      // Promotion : ouvrir le modal avant d'appliquer
       this.pendingPromotion = move;
       this.openPromotionModal(move.color);
     } else {
@@ -248,15 +350,18 @@ const UIManager = {
     }
   },
 
+  /**
+   * Applique un coup via ChessEngine.makeMove (synchrone).
+   * L'évaluation Focus se fait en arrière-plan sans bloquer l'UI.
+   */
   _applyMove(from, to, promo = 'q') {
-    const result = ChessEngine.makeMove(from, to, promo);
-    if (!result) return;
+    const move = ChessEngine.makeMove(from, to, promo);
+    if (!move) return;
 
     this.lastMove       = { from, to };
     this.selectedSquare = null;
     this.legalMoves     = [];
-
-    FocusSystem.onGoodMove();
+    this._clearStockfishVisuals();
 
     this.renderBoard();
     this.updateMoveHistory();
@@ -283,7 +388,118 @@ const UIManager = {
     }
 
     FocusSystem.onGameEnd(false);
+    CareerManager.syncFocus();
     this.showStatus(msg);
+  },
+
+  // ── STOCKFISH VISUEL ─────────────────────────────────────────
+
+  /**
+   * Convertit une case algébrique en coordonnées pixel (centre) sur le SVG 576×576.
+   */
+  _squareToXY(sq) {
+    const files = 'abcdefgh';
+    const col = files.indexOf(sq[0]);
+    const row = 8 - parseInt(sq[1], 10);
+    return { x: col * 72 + 36, y: row * 72 + 36 };
+  },
+
+  /** Dessine ou efface la flèche N3 sur le SVG overlay. */
+  _renderArrow() {
+    const svg = document.getElementById('board-svg');
+    if (!svg) return;
+    // Nettoyer les lignes existantes
+    svg.querySelectorAll('line').forEach(l => l.remove());
+
+    if (!this.sfArrow) return;
+
+    const from = this._squareToXY(this.sfArrow.from);
+    const to   = this._squareToXY(this.sfArrow.to);
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', from.x);
+    line.setAttribute('y1', from.y);
+    line.setAttribute('x2', to.x);
+    line.setAttribute('y2', to.y);
+    line.setAttribute('marker-end', 'url(#arrowhead)');
+    svg.appendChild(line);
+  },
+
+  /**
+   * N1 — Évalue UN SEUL coup et affiche le badge sur la case destination.
+   * Le coup n'est PAS joué — le joueur doit recliquer pour confirmer.
+   */
+  async _evaluateSingleMove(move) {
+    const sq = move.to;
+
+    // Badge loading
+    const el = document.querySelector(`[data-square="${sq}"]`);
+    if (el) {
+      const badge = document.createElement('span');
+      badge.className = 'sf-eval-badge eval-loading';
+      badge.textContent = '…';
+      badge.dataset.evalBadge = sq;
+      el.appendChild(badge);
+    }
+
+    document.getElementById('sf-feedback').textContent = 'N1 — Évaluation en cours…';
+
+    const deltaCp = await ChessEngine.evaluateMoveQuality(move.from, move.to);
+    const abs     = Math.abs(deltaCp);
+    const { label, cls } = this._evalLabel(abs);
+
+    // Vérifier que le badge est toujours pertinent (pas changé de pièce entre temps)
+    if (!this.sfEvalPending || this.sfEvalPending.to !== sq) return;
+
+    // Stocker le résultat pour _showPendingBadge (après re-render)
+    this.sfEvalPending.label = label;
+    this.sfEvalPending.cls   = cls;
+
+    const badge = document.querySelector(`[data-eval-badge="${sq}"]`);
+    if (badge) {
+      badge.textContent = label;
+      badge.className   = 'sf-eval-badge ' + cls;
+    }
+
+    document.getElementById('sf-feedback').textContent =
+      `N1 — ${label}. Clique à nouveau pour jouer ce coup.`;
+  },
+
+  /**
+   * Réaffiche le badge N1 après un re-render du plateau (si un coup est en attente).
+   */
+  _showPendingBadge() {
+    if (!this.sfEvalPending || !this.sfEvalPending.label) return;
+    const sq = this.sfEvalPending.to;
+    const el = document.querySelector(`[data-square="${sq}"]`);
+    if (!el) return;
+    const badge = document.createElement('span');
+    badge.className   = 'sf-eval-badge ' + this.sfEvalPending.cls;
+    badge.textContent = this.sfEvalPending.label;
+    badge.dataset.evalBadge = sq;
+    el.appendChild(badge);
+  },
+
+  /**
+   * Retourne le label et la classe CSS pour un delta cp donné.
+   */
+  _evalLabel(absCp) {
+    if (absCp === 0)        return { label: 'Meilleur',     cls: 'eval-best' };
+    if (absCp <= 30)        return { label: 'Très bon',     cls: 'eval-tres-bon' };
+    if (absCp <= 80)        return { label: 'Bon',          cls: 'eval-bon' };
+    if (absCp <= 150)       return { label: 'Correct',      cls: 'eval-correct' };
+    if (absCp <= 250)       return { label: 'Imprécis',     cls: 'eval-imprecis' };
+    if (absCp <= 400)       return { label: 'Mauvais',      cls: 'eval-mauvais' };
+    return                           { label: 'Blunder',      cls: 'eval-blunder' };
+  },
+
+  /** Efface tous les visuels Stockfish (N1 badges, N2 highlight, N3 flèche). */
+  _clearStockfishVisuals() {
+    this.sfEvalActive   = false;
+    this.sfEvalConsumed = false;
+    this.sfEvalPending  = null;
+    this.sfGuideSquare  = null;
+    this.sfArrow        = null;
   },
 
   _findKing(color) {
@@ -299,26 +515,89 @@ const UIManager = {
   },
 
   _bindButtons() {
+    // Création du personnage
+    document.getElementById('btn-create-player').onclick = () => {
+      const nom         = document.getElementById('input-nom').value.trim();
+      const nationalite = document.getElementById('input-nationalite').value.trim();
+      const style       = document.getElementById('input-style').value;
+
+      if (!nom) {
+        document.getElementById('input-nom').focus();
+        return;
+      }
+
+      CareerManager.createPlayer(nom, nationalite || '—', style);
+      document.getElementById('modal-create-player').close();
+      this.showScreen('dashboard');
+    };
+
+    // Dashboard
+    document.getElementById('dash-btn-play').onclick = () => {
+      this.showScreen('game');
+      this.newGame();
+    };
+
+    document.getElementById('dash-btn-delete').onclick = () => {
+      if (confirm('Effacer la sauvegarde ? Cette action est irréversible.')) {
+        SaveManager.deleteSave();
+        location.reload();
+      }
+    };
+
+    // Écran jeu
+    document.getElementById('btn-back-dashboard').onclick = () => {
+      CareerManager.syncFocus();
+      this.showScreen('dashboard');
+    };
+
     document.getElementById('btn-new-game').onclick = () => this.newGame();
 
-    [1, 2, 3].forEach(lvl => {
-      const btn = document.getElementById('btn-sf' + lvl);
-      if (!btn) return;
-      btn.onclick = () => {
-        const result = FocusSystem.activateStockfish(lvl);
-        if (!result) return;
-        const fb = document.getElementById('sf-feedback');
-        fb.innerHTML =
-          `<strong>Stockfish N${lvl}</strong> — ${result.msg}<br>` +
-          `<small style="color:#777">${result.reliability}</small>`;
-      };
-    });
+    // N1 — Évaluateur : active le mode (badge au prochain clic destination)
+    document.getElementById('btn-sf1').onclick = () => {
+      if (!FocusSystem.activateStockfish(1)) return;
+      this.sfEvalActive   = true;
+      this.sfEvalConsumed = false;
+      this.sfEvalPending  = null;
+      document.getElementById('sf-feedback').textContent =
+        'N1 actif — joue un coup pour voir son évaluation avant de confirmer.';
+    };
+
+    // N2 — Guide pièce : met en surbrillance bleue la pièce à jouer
+    document.getElementById('btn-sf2').onclick = async () => {
+      if (!FocusSystem.activateStockfish(2)) return;
+      document.getElementById('sf-feedback').textContent = 'N2 — Analyse en cours…';
+      const best = await ChessEngine.getBestMove();
+      if (best) {
+        this.sfGuideSquare = best.from;
+        document.getElementById('sf-feedback').textContent =
+          'N2 actif — la pièce en surbrillance bleue devrait jouer.';
+        this.renderBoard();
+      } else {
+        document.getElementById('sf-feedback').textContent = 'N2 — Aucun coup trouvé.';
+      }
+    };
+
+    // N3 — Meilleur coup : flèche SVG source → destination
+    document.getElementById('btn-sf3').onclick = async () => {
+      if (!FocusSystem.activateStockfish(3)) return;
+      document.getElementById('sf-feedback').textContent = 'N3 — Analyse en cours…';
+      const best = await ChessEngine.getBestMove();
+      if (best) {
+        this.sfArrow = { from: best.from, to: best.to };
+        document.getElementById('sf-feedback').textContent =
+          'N3 actif — la flèche montre le meilleur coup.';
+        this.renderBoard();
+      } else {
+        document.getElementById('sf-feedback').textContent = 'N3 — Aucun coup trouvé.';
+      }
+    };
   },
 
 };
 
-// ── LANCEMENT ────────────────────────────────────────────────────
+// ── LANCEMENT ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   ChessEngine.init();
+  CareerManager.init();
   UIManager.init();
 });

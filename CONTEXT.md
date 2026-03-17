@@ -50,7 +50,11 @@ Phase 7 — Boutique, upgrades Stockfish niveaux 1-4, système de talismans
 Phase 8 — Formats Bullet/Blitz/Rapid/Classique, polish, PWA, déploiement
 
 Où j'en suis actuellement
-J'en suis à la phase 1, comme tu peux le voir il y a déjà la structure. 
+Phase 1 terminée : échiquier fonctionnel (roque, promotion, échec, historique).
+Phase 2 terminée : personnage créé, persistance localStorage opérationnelle,
+formule Elo FIDE implémentée, dashboard principal avec stats du joueur.
+chess-engine.js, ui-manager.js, career-manager.js et save-manager.js sont opérationnels.
+Je commence maintenant la Phase 3a.
 
 Comment tu dois travailler avec moi
 Ce que j'attends de toi :

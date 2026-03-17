@@ -1,6 +1,17 @@
+// focus-system.js
+// Jauge Focus, modificateurs, évaluation des coups.
+// SEUL module autorisé à modifier la valeur du Focus.
+// Tous les calculs de Focus passent exclusivement par ce fichier.
+
 const FocusSystem = {
-  current: 100,
-  max: 100,
+
+  // ── ÉTAT ─────────────────────────────────────────────────────
+
+  current:   100,
+  max:       100,
+  modifiers: [],   // Réservé Phase 7 (talismans, upgrades)
+
+  // ── ZONES ────────────────────────────────────────────────────
 
   ZONES: [
     { min: 80, max: 100, color: '#1d9e75', label: 'Concentration maximale' },
@@ -10,79 +21,68 @@ const FocusSystem = {
     { min: 0,  max: 5,   color: '#2c2c2a', label: 'Épuisé'                 },
   ],
 
-  SF_COSTS: { 1: 8, 2: 18, 3: 30 },
-
-  SF_MESSAGES: {
-    1: {
-      good: ['Position saine.', 'Coup jouable.', 'Rien à craindre ici.'],
-      bad:  ['Attention — position fragile.', 'Coup risqué.', 'Danger potentiel.'],
-    },
-    2: {
-      good: [
-        'Coup correct. Meilleure réponse adverse : e5.',
-        'Solide. L\'ordi jouera probablement Cf6.',
-        'Bonne idée. Attention à Db4 en réponse.',
-      ],
-      bad: [
-        'Coup faible. Meilleure réponse : Txf7+!',
-        'Erreur tactique. L\'ordi va jouer Dc3.',
-        'Risqué. Meilleure réponse adverse : d5.',
-      ],
-    },
-    3: {
-      good: [
-        'Coup fort. Variation : ...e5 Cf3 Cc6 — vous êtes mieux.',
-        'Correct. Variation : ...d5 exd5 Cxd5 = égalité.',
-        'Bon plan. Variation : ...Dc7 b4 a5 avec avantage d\'espace.',
-      ],
-      bad: [
-        'Gaffe. Variation : ...Txf7! Rxf7 Dh5+ — mat en 4.',
-        'Erreur. Variation : ...d5! exd5 Dxd5 — votre centre s\'effondre.',
-        'Coup faible. Variation : ...Cc4! gagne une pièce immédiatement.',
-      ],
-    },
-  },
-
+  /** @returns {object} zone correspondant au Focus actuel */
   getZone() {
     return this.ZONES.find(z => this.current >= z.min) || this.ZONES[4];
   },
 
+  // ── COÛTS STOCKFISH ──────────────────────────────────────────
+
+  SF_COSTS: { 1: 7, 2: 14, 3: 22 },
+
+  // ── MODIFICATION DU FOCUS ────────────────────────────────────
+
+  /**
+   * Modifie le Focus courant, clamp entre 0 et max, met à jour le rendu.
+   * @param {number} delta  - variation (+/-)
+   * @param {string} reason - texte affiché dans le log console
+   */
   apply(delta, reason) {
     this.current = Math.max(0, Math.min(this.current + delta, this.max));
     this.render();
-    if (reason) this.log(delta, reason);
+    if (reason) this._log(delta, reason);
   },
 
-  activateStockfish(level) {
-    const cost = this.SF_COSTS[level];
-    if (this.current < cost) return null;
+  // ── GRILLE D'ÉVALUATION DES COUPS ───────────────────────────
 
-    this.apply(-cost, `Stockfish niveau ${level} activé`);
+  /**
+   * Évalue un coup selon le delta centipawns et applique la variation de Focus.
+   *
+   *   delta 0 cp       → meilleur coup  → +15%
+   *   delta 1-49 cp    → bon coup       → +5%
+   *   delta 50-99 cp   → neutre         → 0%
+   *   delta 100-199 cp → imprécision    → -10%
+   *   delta 200+ cp    → gaffe          → -25%
+   *
+   * @param {number}  deltaCp  - perte en centipawns (0 = parfait, positif = perte)
+   * @param {boolean} sfUsed   - true si Stockfish a été utilisé ce tour (supprime les bonus)
+   */
+  evaluateMoveDelta(deltaCp, sfUsed) {
+    const abs = Math.abs(deltaCp);
 
-    const zone    = this.getZone();
-    const quality = this.current > 60 ? 'good'
-                  : this.current > 20 ? 'good'  // dégradé mais pas totalement mauvais
-                  : 'bad';
-    const msgs    = this.SF_MESSAGES[level][quality];
-    const msg     = msgs[Math.floor(Math.random() * msgs.length)];
-
-    const reliability = this.current > 60 ? 'Analyse fiable.'
-                      : this.current > 20 ? 'Analyse dégradée — à confirmer.'
-                      : 'Signal très bruité — fiabilité faible.';
-
-    return { msg, reliability, level };
+    if (abs === 0)              { if (!sfUsed) this.onBestMove(); }
+    else if (abs <= 49)         { if (!sfUsed) this.onGoodMove(); }
+    else if (abs <= 99)         { /* neutre — rien */ }
+    else if (abs <= 199)        this.onImprecision();
+    else                        this.onBlunder();
   },
 
-  onGoodMove() {
-    this.apply(+3, 'Coup correct joué');
-  },
+  // ── CALLBACKS PAR TYPE DE COUP ───────────────────────────────
 
   onBestMove() {
     this.apply(+15, 'Meilleur coup trouvé seul');
   },
 
+  onGoodMove() {
+    this.apply(+5, 'Bon coup joué');
+  },
+
+  onImprecision() {
+    this.apply(-10, 'Imprécision détectée');
+  },
+
   onBlunder() {
-    this.apply(-25, 'Gaffe — pièce perdue');
+    this.apply(-25, 'Gaffe — perte significative');
   },
 
   onGameEnd(won) {
@@ -90,13 +90,41 @@ const FocusSystem = {
     else     this.apply(-5,  'Défaite');
   },
 
+  // ── ACTIVATION STOCKFISH (COÛTS FOCUS) ──────────────────────
+
+  /**
+   * Active l'analyse Stockfish payante.
+   * Déduit le coût et signale à ChessEngine que Stockfish a été utilisé ce tour.
+   * @param {number} level - 1, 2, ou 3
+   * @returns {boolean} true si activé, false si Focus insuffisant
+   */
+  activateStockfish(level) {
+    const cost = this.SF_COSTS[level];
+    if (this.current < cost) return false;
+
+    this.apply(-cost, `Stockfish niveau ${level} activé`);
+    ChessEngine.setUsedStockfish();
+    return true;
+  },
+
+  // ── RESET ENTRE LES PARTIES ─────────────────────────────────
+
+  /**
+   * Récupération de 40% du Focus max, plafonné à max.
+   * Appelé au début de chaque nouvelle partie.
+   */
   resetForGame() {
-    // Le Focus repart au niveau actuel + récupération de 40%
     const recovery = Math.min(this.max, this.current + this.max * 0.4);
     this.current = Math.round(recovery);
     this.render();
   },
 
+  // ── RENDU ────────────────────────────────────────────────────
+
+  /**
+   * Met à jour la barre visuelle Focus et les boutons Stockfish.
+   * Ajoute/retire la classe de tremblement si zone épuisée.
+   */
   render() {
     const pct  = Math.round((this.current / this.max) * 100);
     const zone = this.getZone();
@@ -109,15 +137,35 @@ const FocusSystem = {
     bar.style.backgroundColor = zone.color;
     val.textContent           = Math.round(this.current) + '%  — ' + zone.label;
 
-    // Désactiver les boutons Stockfish si Focus insuffisant
+    // Désactiver les boutons Stockfish si Focus insuffisant + tooltip
     [1, 2, 3].forEach(lvl => {
-      const btn = document.getElementById('btn-sf' + lvl);
-      if (btn) btn.disabled = this.current < this.SF_COSTS[lvl];
+      const btn     = document.getElementById('btn-sf' + lvl);
+      const tooltip = document.getElementById('tooltip-sf' + lvl);
+      if (!btn) return;
+      const insufficient = this.current < this.SF_COSTS[lvl];
+      btn.disabled = insufficient;
+      if (tooltip) {
+        tooltip.dataset.tip = insufficient
+          ? `Focus insuffisant (${this.SF_COSTS[lvl]}% requis)`
+          : '';
+      }
     });
+
+    // Tremblement ponctuel de l'échiquier en zone épuisée (0-5%)
+    const boardEl = document.getElementById('board');
+    if (boardEl && zone.min === 0 && zone.max === 5) {
+      boardEl.classList.remove('focus-exhausted');
+      // Force reflow pour relancer l'animation
+      void boardEl.offsetWidth;
+      boardEl.classList.add('focus-exhausted');
+    }
   },
 
-  log(delta, reason) {
+  // ── LOG ──────────────────────────────────────────────────────
+
+  _log(delta, reason) {
     const sign = delta > 0 ? '+' : '';
     console.log(`[Focus] ${reason} (${sign}${delta}%) → ${Math.round(this.current)}%`);
   },
+
 };

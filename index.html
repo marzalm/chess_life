@@ -14,83 +14,227 @@
     }
   </script>
 
-  <!-- DaisyUI 5 (composants) + Tailwind CSS 4 (utilitaires) -->
+  <!-- DaisyUI 5 + Tailwind CSS 4 via CDN -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/daisyui.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
-  <!-- Styles spécifiques au projet -->
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/ui.css">
 </head>
 <body>
 
-  <div id="app">
+  <!-- ══════════════════════════════════════════════════════════════
+       ÉCRAN : DASHBOARD
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-dashboard" class="hidden">
+    <div class="dashboard-wrap">
 
-    <!-- ── SIDEBAR GAUCHE ── -->
-    <div id="sidebar">
-
-      <div id="player-info">
-        <div class="label">Ton Elo</div>
-        <div id="player-elo">1200</div>
-      </div>
-
-      <div id="opponent-info">
-        <div class="label">Adversaire</div>
-        <div id="opponent-name">—</div>
-        <div id="opponent-elo">—</div>
-      </div>
-
-      <div id="focus-section">
-        <div class="label">Focus</div>
-        <div id="focus-bar-wrap">
-          <div id="focus-bar"></div>
+      <!-- En-tête : nom + Elo -->
+      <div class="dash-header">
+        <div>
+          <h1 id="dash-player-name" class="dash-name">Joueur</h1>
+          <p id="dash-player-meta" class="dash-meta"></p>
         </div>
-        <div id="focus-value">100%</div>
+        <div class="dash-elo-box">
+          <span class="dash-elo-label">ELO</span>
+          <span id="dash-elo" class="dash-elo-value">800</span>
+        </div>
       </div>
 
-      <div id="stockfish-section">
-        <div class="label">Analyse Stockfish</div>
-        <button class="sf-btn" id="btn-sf1">Niveau 1 — feu vert/rouge (-8%)</button>
-        <button class="sf-btn" id="btn-sf2">Niveau 2 — meilleur coup adverse (-18%)</button>
-        <button class="sf-btn" id="btn-sf3">Niveau 3 — variation 3 coups (-30%)</button>
-        <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
+      <!-- Stats principales (DaisyUI stats) -->
+      <div class="stats shadow-md w-full dash-stats">
+        <div class="stat">
+          <div class="stat-title">Solde</div>
+          <div class="stat-value text-warning" id="dash-solde">500 €</div>
+          <div class="stat-desc">Argent disponible</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Focus Max</div>
+          <div class="stat-value text-info" id="dash-focus-max">100 %</div>
+          <div class="stat-desc">Concentration maximale</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Parties</div>
+          <div class="stat-value" id="dash-games-count">0</div>
+          <div class="stat-desc" id="dash-record">—</div>
+        </div>
       </div>
 
-      <div id="game-controls">
-        <button id="btn-new-game">Nouvelle partie</button>
-        <div id="game-status">Lance une partie pour commencer.</div>
+      <!-- Compétences -->
+      <div class="dash-skills">
+        <h2 class="dash-section-title">Compétences</h2>
+
+        <div class="skill-row">
+          <span class="skill-name">Ouvertures</span>
+          <progress class="progress progress-primary skill-bar"
+                    id="skill-ouvertures" value="10" max="100"></progress>
+          <span class="skill-val" id="skill-ouvertures-val">10</span>
+        </div>
+
+        <div class="skill-row">
+          <span class="skill-name">Finales</span>
+          <progress class="progress progress-secondary skill-bar"
+                    id="skill-endgame" value="10" max="100"></progress>
+          <span class="skill-val" id="skill-endgame-val">10</span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="dash-actions">
+        <button id="dash-btn-play" class="btn btn-primary btn-lg w-full">
+          ♟ Jouer une partie
+        </button>
+        <button id="dash-btn-delete" class="btn btn-ghost btn-xs text-error mt-2">
+          Effacer la sauvegarde et recommencer
+        </button>
+      </div>
+
+      <!-- Historique récent -->
+      <div id="dash-history" class="dash-history">
+        <h2 class="dash-section-title">Parties récentes</h2>
+        <div id="dash-history-list" class="dash-history-list"></div>
       </div>
 
     </div>
-
-    <!-- ── ÉCHIQUIER CENTRE ── -->
-    <div id="board-section">
-      <div id="captured-black"></div>
-      <div id="board-container">
-        <div id="board"></div>
-      </div>
-      <div id="captured-white"></div>
-    </div>
-
-    <!-- ── HISTORIQUE DROITE ── -->
-    <div id="move-history">
-      <div class="label">Historique</div>
-      <div id="moves-list"></div>
-    </div>
-
   </div>
 
-  <!-- ── MODAL DE PROMOTION (DaisyUI dialog) ── -->
+  <!-- ══════════════════════════════════════════════════════════════
+       ÉCRAN : JEU
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-game" class="hidden">
+
+    <button id="btn-back-dashboard" class="btn btn-ghost btn-sm back-btn">
+      ← Retour
+    </button>
+
+    <div id="app">
+
+      <!-- Sidebar gauche -->
+      <div id="sidebar">
+        <div id="player-info">
+          <div class="label">Ton Elo</div>
+          <div id="player-elo">800</div>
+        </div>
+        <div id="opponent-info">
+          <div class="label">Adversaire</div>
+          <div id="opponent-name">—</div>
+          <div id="opponent-elo">—</div>
+        </div>
+        <div id="focus-section">
+          <div class="label">Focus</div>
+          <div id="focus-bar-wrap">
+            <div id="focus-bar"></div>
+          </div>
+          <div id="focus-value">100%</div>
+        </div>
+        <div id="stockfish-section">
+          <div class="label">Analyse Stockfish</div>
+          <div class="tooltip w-full" id="tooltip-sf1" data-tip="">
+            <button class="sf-btn w-full" id="btn-sf1">N1 — Évaluateur de coup (-7%)</button>
+          </div>
+          <div class="tooltip w-full" id="tooltip-sf2" data-tip="">
+            <button class="sf-btn w-full" id="btn-sf2">N2 — Guide pièce (-14%)</button>
+          </div>
+          <div class="tooltip w-full" id="tooltip-sf3" data-tip="">
+            <button class="sf-btn w-full" id="btn-sf3">N3 — Meilleur coup (-22%)</button>
+          </div>
+          <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
+        </div>
+        <div id="game-controls">
+          <button id="btn-new-game">Nouvelle partie</button>
+          <div id="game-status">Lance une partie pour commencer.</div>
+        </div>
+      </div>
+
+      <!-- Échiquier centre -->
+      <div id="board-section">
+        <div id="captured-black"></div>
+        <div id="board-container">
+          <div id="board"></div>
+          <svg id="board-svg" viewBox="0 0 576 576" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7"
+                      refX="8" refY="3.5" orient="auto" fill="#3b82f6">
+                <polygon points="0 0, 10 3.5, 0 7" />
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <div id="captured-white"></div>
+      </div>
+
+      <!-- Historique droite -->
+      <div id="move-history">
+        <div class="label">Historique</div>
+        <div id="moves-list"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL : CRÉATION DU PERSONNAGE (DaisyUI dialog)
+       Affiché automatiquement au premier lancement.
+  ══════════════════════════════════════════════════════════════ -->
+  <dialog id="modal-create-player" class="modal">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-xl font-bold mb-1">Crée ton personnage</h2>
+      <p class="text-sm opacity-60 mb-5">Tu ne pourras pas changer ces informations plus tard.</p>
+
+      <div class="form-control mb-4">
+        <label class="label">
+          <span class="label-text">Ton prénom</span>
+        </label>
+        <input type="text" id="input-nom"
+               class="input input-bordered w-full"
+               placeholder="Magnus, Fabiano…"
+               maxlength="24" autocomplete="off" />
+      </div>
+
+      <div class="form-control mb-4">
+        <label class="label">
+          <span class="label-text">Nationalité</span>
+        </label>
+        <input type="text" id="input-nationalite"
+               class="input input-bordered w-full"
+               placeholder="France, Russie, Inde…"
+               maxlength="30" autocomplete="off" />
+      </div>
+
+      <div class="form-control mb-6">
+        <label class="label">
+          <span class="label-text">Style de jeu</span>
+        </label>
+        <select id="input-style" class="select select-bordered w-full">
+          <option value="Positionnel">Positionnel — solidité et structure</option>
+          <option value="Tactique">Tactique — complications et sacrifices</option>
+          <option value="Universel">Universel — adaptable à toute position</option>
+        </select>
+      </div>
+
+      <div class="modal-action">
+        <button id="btn-create-player" class="btn btn-primary w-full">
+          Commencer la carrière →
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL : PROMOTION (DaisyUI dialog)
+  ══════════════════════════════════════════════════════════════ -->
   <dialog id="promotion-modal" class="modal">
     <div class="modal-box bg-base-200 border border-primary/30 text-center">
-      <h3 class="text-lg font-bold mb-4 text-base-content">Promotion — choisissez la pièce</h3>
+      <h3 class="text-lg font-bold mb-4">Promotion — choisissez la pièce</h3>
       <div id="promotion-choices" class="flex gap-4 justify-center"></div>
     </div>
   </dialog>
 
-  <!-- ── SCRIPTS ── -->
+  <!-- ── SCRIPTS (ordre de dépendance) ── -->
   <script src="lib/chess.js"></script>
+  <script src="js/save-manager.js"></script>
   <script src="js/focus-system.js"></script>
+  <script src="js/career-manager.js"></script>
   <script src="js/chess-engine.js"></script>
   <script src="js/ui-manager.js"></script>
 
