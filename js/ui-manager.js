@@ -802,11 +802,6 @@ const UIManager = {
       }
     };
 
-    // Flow State — activation
-    document.getElementById('btn-flow-state').onclick = () => {
-      FocusSystem.activateFlowState();
-    };
-
     // Revue post-partie — fermeture
     document.getElementById('btn-close-review').onclick = () => {
       ReviewManager.stopReview();

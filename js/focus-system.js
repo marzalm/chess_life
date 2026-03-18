@@ -1,5 +1,5 @@
 // focus-system.js
-// Jauge Focus, modificateurs, Flow State, évaluation des coups.
+// Jauge Focus, modificateurs, Flow State (paliers auto), évaluation des coups.
 // SEUL module autorisé à modifier la valeur du Focus.
 // Tous les calculs de Focus passent exclusivement par ce fichier.
 
@@ -8,7 +8,7 @@ const FocusSystem = {
   // ── ÉTAT ─────────────────────────────────────────────────────
 
   current:   100,
-  max:       100,
+  max:       100,          // max de base (réduit par usage SF, reset chaque partie)
 
   /**
    * Tableau de modificateurs dynamiques.
@@ -23,16 +23,23 @@ const FocusSystem = {
    */
   modifiers: [],
 
-  // ── FLOW STATE ──────────────────────────────────────────────
+  // ── MOMENTUM ──────────────────────────────────────────────────
 
-  consecutiveGoodMoves:   0,
-  flowState:              false,
-  flowStateCoupsRestants: 0,
-  flowStateButtonVisible: false,
-  flowDecayRemaining:     0,
-  flowDecayPerMove:       0,
-  _flowMaxBase:           0,
-  shakeTriggered:         false,
+  consecutiveGoodMoves: 0,
+
+  // ── FLOW STATE (PALIERS) ──────────────────────────────────────
+
+  /**
+   * Palier Flow dérivé de consecutiveGoodMoves :
+   *   0-2 : pas de Flow
+   *   3-4 : Flow I
+   *   5-6 : Flow II
+   *   7-9 : Flow III
+   *   10+ : Flow MAX
+   */
+  flowPalier: 0,     // cache recalculé après chaque changement de compteur
+
+  shakeTriggered: false,
 
   // ── ZONES ────────────────────────────────────────────────────
 
@@ -52,7 +59,8 @@ const FocusSystem = {
 
   // ── COÛTS STOCKFISH ──────────────────────────────────────────
 
-  SF_COSTS: { 1: 7, 2: 14, 3: 22 },
+  SF_COSTS:         { 1: 7, 2: 14, 3: 22 },
+  SF_MAX_PENALTIES: { 1: 0.03, 2: 0.05, 3: 0.08 },
 
   /**
    * Retourne le coût effectif Stockfish après application des modificateurs.
@@ -65,6 +73,113 @@ const FocusSystem = {
       .filter(m => m.type === 'sf-cost-reduction')
       .reduce((sum, m) => sum + m.value, 0);
     return Math.max(1, Math.round(base * (1 - Math.min(reduction, 0.9))));
+  },
+
+  /**
+   * Retourne le coût Focus réel de SF en tenant compte de la gratuité Flow.
+   * En Flow I: N1 gratuit. En Flow II: N1+N2 gratuits. En Flow III+: tout gratuit.
+   * @param {number} level
+   * @returns {number} 0 si gratuit en Flow, sinon coût effectif
+   */
+  _getFlowAdjustedCost(level) {
+    if (this.flowPalier === 0) return this.getEffectiveSFCost(level);
+    const freeN = this.FLOW_CONFIG[this.flowPalier].freeN;
+    if (level <= freeN) return 0;
+    return this.getEffectiveSFCost(level);
+  },
+
+  // ── FLOW STATE CONFIG ────────────────────────────────────────
+
+  /**
+   * Configuration de chaque palier Flow.
+   *   gainMult:  multiplicateur des gains Focus
+   *   capBonus:  bonus au Focus max effectif (0.10 = +10%)
+   *   freeN:     niveaux SF gratuits (1 = N1, 2 = N1+N2, 3 = N1+N2+N3)
+   *   tightening: réduction du seuil "bon coup" en cp
+   */
+  FLOW_CONFIG: {
+    1: { gainMult: 1.25, capBonus: 0.10, freeN: 1, tightening: 0  },
+    2: { gainMult: 1.50, capBonus: 0.20, freeN: 2, tightening: 10 },
+    3: { gainMult: 1.75, capBonus: 0.30, freeN: 3, tightening: 20 },
+    4: { gainMult: 2.00, capBonus: 0.30, freeN: 3, tightening: 25 },
+  },
+
+  /**
+   * Seuil de consecutiveGoodMoves pour atteindre chaque palier.
+   */
+  FLOW_THRESHOLDS: { 1: 3, 2: 5, 3: 7, 4: 10 },
+
+  // ── SEUILS ADAPTATIFS PAR ELO ─────────────────────────────────
+
+  /**
+   * Retourne le seuil "bon coup" de base en centipawns selon l'Elo du joueur.
+   * Données basées sur les ACPL moyens observés par tranche de rating.
+   * Sources : 33rdsquare.com, chess.com, lichess.org
+   */
+  _getBaseThreshold() {
+    const elo = this._getPlayerElo();
+    if (elo < 1000) return 90;
+    if (elo < 1200) return 75;
+    if (elo < 1400) return 60;
+    if (elo < 1600) return 50;
+    if (elo < 1800) return 40;
+    return 30;
+  },
+
+  /**
+   * Retourne le seuil "bon coup" effectif, incluant le tightening du palier Flow actuel.
+   * @returns {number} seuil en cp (un coup en dessous = bon coup)
+   */
+  _getGoodMoveThreshold() {
+    const base = this._getBaseThreshold();
+    if (this.flowPalier === 0) return base;
+    const tightening = this.FLOW_CONFIG[this.flowPalier].tightening;
+    return Math.max(15, base - tightening);
+  },
+
+  _getPlayerElo() {
+    if (typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()) {
+      return CareerManager.getPlayer().elo;
+    }
+    return 800;
+  },
+
+  // ── CAPTURE MICRO-REGEN ───────────────────────────────────────
+
+  CAPTURE_FOCUS: { p: 1, n: 2, b: 2, r: 3, q: 5 },
+
+  // ── MOMENTUM : GAINS PROGRESSIFS ──────────────────────────────
+
+  /**
+   * Retourne le gain Focus pour un bon coup selon le momentum (consecutiveGoodMoves).
+   * @param {boolean} isBest — true si delta 0cp (meilleur coup)
+   * @returns {number} gain brut (avant multiplicateurs)
+   */
+  _getMomentumGain(isBest) {
+    const n = this.consecutiveGoodMoves; // valeur AVANT incrément (le +1 est fait après)
+    if (isBest) {
+      if (n >= 3) return 18;
+      if (n >= 2) return 15;
+      if (n >= 1) return 12;
+      return 8;
+    }
+    // Bon coup (pas meilleur)
+    if (n >= 3) return 10;
+    if (n >= 2) return 7;
+    if (n >= 1) return 5;
+    return 3;
+  },
+
+  // ── PÉNALITÉS GRADUELLES ──────────────────────────────────────
+
+  /**
+   * Retourne la pénalité Focus pour un mauvais coup (≥100cp).
+   * Formule continue : -min(35, 5 + delta/20)
+   * @param {number} abs — delta en cp (valeur absolue)
+   * @returns {number} pénalité (nombre négatif)
+   */
+  _getGraduatedPenalty(abs) {
+    return -Math.round(Math.min(35, 5 + abs / 20));
   },
 
   // ── MODIFICATEURS ──────────────────────────────────────────
@@ -93,23 +208,19 @@ const FocusSystem = {
   // ── MAX EFFECTIF ─────────────────────────────────────────────
 
   /**
-   * Retourne le max effectif (incluant les bonus passifs ou le 130% Flow State).
-   * this.max reste toujours le max de base (persisté dans career).
+   * Retourne le max effectif incluant le cap bonus du palier Flow.
+   * this.max reste le max de base (réduit par usage SF).
    */
   _getEffectiveMax() {
-    if (this.flowState) return Math.round(this._flowMaxBase * 1.3);
-    const n = this.consecutiveGoodMoves;
-    let bonus = 0;
-    if (n >= 6)      bonus = 0.15;
-    else if (n >= 5) bonus = 0.10;
-    else if (n >= 4) bonus = 0.05;
-    return Math.round(this.max * (1 + bonus));
+    if (this.flowPalier === 0) return this.max;
+    const config = this.FLOW_CONFIG[this.flowPalier];
+    return Math.round(this.max * (1 + config.capBonus));
   },
 
   // ── MODIFICATION DU FOCUS ──────────────────────────────────
 
   /**
-   * Modifie le Focus courant avec application des modificateurs (Confiance, etc.).
+   * Modifie le Focus courant avec application des modificateurs (Confiance, Flow, etc.).
    * Clamp entre 0 et effectiveMax.
    * @param {number} delta  - variation brute (+/-)
    * @param {string} reason - texte affiché dans le log console
@@ -130,240 +241,199 @@ const FocusSystem = {
   // ── GRILLE D'ÉVALUATION DES COUPS ───────────────────────────
 
   /**
-   * Évalue un coup selon le delta centipawns, applique la variation de Focus,
-   * et met à jour le compteur Flow State.
+   * Évalue un coup selon le delta centipawns et le contexte.
    *
-   *   delta 0 cp       → meilleur coup  → +15%
-   *   delta 1-49 cp    → bon coup       → +5%
-   *   delta 50-99 cp   → neutre         → 0%
-   *   delta 100-199 cp → imprécision    → -10%
-   *   delta 200+ cp    → gaffe          → -25%
+   * Système :
+   *   delta < threshold   → bon/meilleur coup → gains progressifs (momentum)
+   *   threshold ≤ delta < 100 → neutre → 0%
+   *   100 ≤ delta < 200   → imprécision → pénalité graduée
+   *   delta ≥ 200          → blunder → pénalité graduée + sortie Flow
    *
-   * @param {number}  deltaCp  - perte en centipawns (0 = parfait, positif = perte)
-   * @param {boolean} sfUsed   - true si Stockfish a été utilisé ce tour
+   * @param {number}  deltaCp       - perte en centipawns (0 = parfait)
+   * @param {boolean} sfUsed        - true si Stockfish a été utilisé ce tour
+   * @param {string|null} captured  - type de pièce capturée ('p','n','b','r','q') ou null
    */
-  evaluateMoveDelta(deltaCp, sfUsed) {
+  evaluateMoveDelta(deltaCp, sfUsed, captured) {
     const abs = Math.abs(deltaCp);
+    const threshold = this._getGoodMoveThreshold();
 
-    // 1. Appliquer le changement de Focus
-    if (abs === 0)              { if (!sfUsed) this.onBestMove(); }
-    else if (abs <= 49)         { if (!sfUsed) this.onGoodMove(); }
-    else if (abs <= 99)         { /* neutre — rien */ }
-    else if (abs <= 199)        this.onImprecision();
-    else                        this.onBlunder();
-
-    // 2. Gérer le déclin post-Flow State (sur 2 coups)
-    if (this.flowDecayRemaining > 0) {
-      this.flowDecayRemaining--;
-      if (this.current > this.max) {
-        this.current -= this.flowDecayPerMove;
-      }
-      if (this.flowDecayRemaining <= 0) {
-        this.current = Math.min(this.current, this.max);
-      }
+    // 1. Capture micro-regen (indépendant de la qualité du coup)
+    if (captured && this.CAPTURE_FOCUS[captured]) {
+      this.apply(+this.CAPTURE_FOCUS[captured], `Capture (${captured})`);
     }
 
-    // 3. Flow State actif : décrémenter le compteur
-    if (this.flowState) {
-      this.flowStateCoupsRestants--;
-      if (this.flowStateCoupsRestants <= 0) {
-        this._endFlowState();
-      }
-      this.render();
-      return;   // Pas de mise à jour du compteur consécutif pendant le Flow State actif
-    }
+    // 2. Évaluation de la qualité du coup
+    if (abs < threshold && !sfUsed) {
+      // ── Bon ou meilleur coup ──
+      const gain = this._getMomentumGain(abs === 0);
+      this.apply(+gain, abs === 0 ? 'Meilleur coup' : 'Bon coup');
 
-    // 4. Mise à jour du compteur de coups consécutifs
-    if (abs < 50 && !sfUsed) {
+      // Incrémenter le compteur et recalculer le palier Flow
       this.consecutiveGoodMoves++;
-      this._updatePassiveBonuses();
-    } else if (abs >= 50) {
+      this._updateFlowFromCounter();
+
+    } else if (abs >= 100) {
+      // ── Mauvais coup (imprécision ou blunder) ──
+      const penalty = this._getGraduatedPenalty(abs);
+      this.apply(penalty, abs >= 200 ? 'Blunder' : 'Imprécision');
+
+      // Dégradation du Flow
+      if (this.flowPalier > 0) {
+        if (abs >= 200) {
+          this._exitFlow();
+        } else {
+          this._dropFlowPalier();
+        }
+      }
       this.consecutiveGoodMoves = 0;
-      this.flowStateButtonVisible = false;
-      this._removePassiveBonuses();
+
+    } else {
+      // ── Neutre (threshold ≤ abs < 100) ──
+      // Pas de gain ni perte. Le compteur reste inchangé. Le Flow maintient son palier.
+      if (sfUsed) {
+        // Si SF utilisé et coup neutre : le compteur a déjà été reset dans activateStockfish
+      }
     }
-    // Si sfUsed && abs < 50 : le compteur était déjà remis à 0 dans activateStockfish()
-    // mais le bouton reste visible — on ne touche à rien ici
 
     this.render();
   },
 
-  // ── BONUS PASSIFS FLOW STATE ─────────────────────────────────
+  // ── FLOW STATE : TRANSITIONS ───────────────────────────────
 
   /**
-   * Retourne le niveau passif Flow State (0-4) selon les coups consécutifs.
-   *   3 → level 1 : SF -10%, focus remplit à 100%
-   *   4 → level 2 : SF -20%, focusMax temp +5%
-   *   5 → level 3 : SF -30%, focusMax temp +10%
-   *   6+→ level 4 : SF -40%, focusMax temp +15%
+   * Dérive le palier Flow du compteur de coups consécutifs
+   * et gère les transitions (entrée, progression).
    */
-  _getPassiveLevel() {
+  _updateFlowFromCounter() {
     const n = this.consecutiveGoodMoves;
-    if (n >= 6) return 4;
-    if (n >= 5) return 3;
-    if (n >= 4) return 2;
-    if (n >= 3) return 1;
-    return 0;
-  },
+    let newPalier = 0;
+    if (n >= 10) newPalier = 4;
+    else if (n >= 7) newPalier = 3;
+    else if (n >= 5) newPalier = 2;
+    else if (n >= 3) newPalier = 1;
 
-  /**
-   * Met à jour les bonus passifs selon le niveau courant.
-   * Appelé après chaque incrémentation de consecutiveGoodMoves.
-   */
-  _updatePassiveBonuses() {
-    const level = this._getPassiveLevel();
+    if (newPalier > this.flowPalier) {
+      const oldPalier = this.flowPalier;
+      this.flowPalier = newPalier;
+      this._updateFlowModifiers();
 
-    if (level >= 1) {
-      this.flowStateButtonVisible = true;
-    }
-
-    // Retirer l'ancien modificateur passif
-    this.removeModifier('flow-passive-sf');
-
-    if (level === 0) return;
-
-    // Réduction des coûts Stockfish selon le niveau
-    const reductions = { 1: 0.10, 2: 0.20, 3: 0.30, 4: 0.40 };
-    this.addModifier({
-      id: 'flow-passive-sf',
-      type: 'sf-cost-reduction',
-      value: reductions[level],
-    });
-
-    // À l'entrée du niveau 1 (exactement 3 coups) : remplir le focus au max
-    if (this.consecutiveGoodMoves === 3) {
-      this.current = this.max;
+      const names = ['', 'I', 'II', 'III', 'MAX'];
+      if (oldPalier === 0) {
+        this._log(0, `Flow State ${names[newPalier]} activé !`);
+      } else {
+        this._log(0, `Flow State monte à ${names[newPalier]} !`);
+      }
     }
   },
 
   /**
-   * Retire tous les bonus passifs et clamp le focus au max de base.
+   * Descend d'un palier Flow (imprécision 100-199cp).
+   * Remet le compteur au seuil d'entrée du palier inférieur.
    */
-  _removePassiveBonuses() {
-    this.removeModifier('flow-passive-sf');
-    if (this.current > this.max && !this.flowState) {
-      this.current = this.max;
+  _dropFlowPalier() {
+    if (this.flowPalier <= 1) {
+      this._exitFlow();
+      return;
     }
-  },
 
-  // ── ACTIVATION / FIN DU FLOW STATE ──────────────────────────
+    this.flowPalier--;
+    // Remettre le compteur au seuil d'entrée du palier actuel
+    this.consecutiveGoodMoves = this.FLOW_THRESHOLDS[this.flowPalier];
+    this._updateFlowModifiers();
 
-  /**
-   * Active le Flow State.
-   * - Malus permanent au max (10% composé)
-   * - Focus monte à 130% du max réduit
-   * - Coûts Stockfish -50% pendant 5 coups
-   * @returns {boolean} true si activé
-   */
-  activateFlowState() {
-    if (!this.flowStateButtonVisible) return false;
-
-    this.flowState = true;
-    this.flowStateCoupsRestants = 5;
-
-    // Stocker le max avant malus pour le calcul du 130%
-    this._flowMaxBase = this.max;
-
-    // Focus monte à 130% du max (avant malus)
-    this.current = Math.round(this.max * 1.3);
-
-    // Malus permanent au max (10% composé)
-    this.max = Math.round(this.max * 0.9);
-
-    // Retirer bonus passifs, ajouter bonus actif (-50% coûts SF)
-    this._removePassiveBonuses();
-    this.addModifier({
-      id: 'flow-active-sf',
-      type: 'sf-cost-reduction',
-      value: 0.50,
-    });
-
-    // Masquer le bouton pendant l'état actif
-    this.flowStateButtonVisible = false;
-
-    this.render();
-    this._log(0, 'Flow State activé !');
-    return true;
+    const names = ['', 'I', 'II', 'III', 'MAX'];
+    this._log(0, `Flow State descend à ${names[this.flowPalier]}`);
   },
 
   /**
-   * Termine le Flow State actif.
-   * Programme le déclin du focus vers le max sur 2 coups.
+   * Sort complètement du Flow State.
    */
-  _endFlowState() {
-    this.flowState = false;
-    this.flowStateCoupsRestants = 0;
+  _exitFlow() {
+    const wasInFlow = this.flowPalier > 0;
+    this.flowPalier = 0;
     this.consecutiveGoodMoves = 0;
-    this.flowStateButtonVisible = false;
-    this._flowMaxBase = 0;
-    this.removeModifier('flow-active-sf');
+    this.removeModifier('flow-gain-mult');
 
-    // Programmer le déclin du focus au-dessus du max sur 2 coups
+    // Clamp focus au max de base si on dépasse
     if (this.current > this.max) {
-      const excess = this.current - this.max;
-      this.flowDecayRemaining = 2;
-      this.flowDecayPerMove = excess / 2;
+      this.current = this.max;
     }
 
-    this._log(0, 'Flow State terminé');
+    if (wasInFlow) this._log(0, 'Flow State terminé');
   },
 
-  // ── CALLBACKS PAR TYPE DE COUP ───────────────────────────────
-
-  onBestMove() {
-    this.apply(+15, 'Meilleur coup trouvé seul');
+  /**
+   * Met à jour le modificateur de gain Focus selon le palier Flow actuel.
+   */
+  _updateFlowModifiers() {
+    if (this.flowPalier === 0) {
+      this.removeModifier('flow-gain-mult');
+      return;
+    }
+    const config = this.FLOW_CONFIG[this.flowPalier];
+    this.addModifier({
+      id: 'flow-gain-mult',
+      type: 'focus-gain-mult',
+      value: config.gainMult,
+    });
   },
 
-  onGoodMove() {
-    this.apply(+5, 'Bon coup joué');
-  },
-
-  onImprecision() {
-    this.apply(-10, 'Imprécision détectée');
-  },
-
-  onBlunder() {
-    this.apply(-25, 'Gaffe — perte significative');
-  },
+  // ── CALLBACKS GAME END ─────────────────────────────────────
 
   onGameEnd(won) {
-    // Nettoyer le Flow State actif si la partie se termine pendant
-    if (this.flowState) {
-      this.flowState = false;
-      this.flowStateCoupsRestants = 0;
-      this._flowMaxBase = 0;
-      this.removeModifier('flow-active-sf');
+    // Nettoyer le Flow State
+    if (this.flowPalier > 0) {
+      this.flowPalier = 0;
+      this.removeModifier('flow-gain-mult');
     }
     this.consecutiveGoodMoves = 0;
-    this.flowStateButtonVisible = false;
-    this._removePassiveBonuses();
-    this.flowDecayRemaining = 0;
-    this.flowDecayPerMove = 0;
 
     if (won) this.apply(+20, 'Victoire remportée');
     else     this.apply(-5,  'Défaite');
   },
 
-  // ── ACTIVATION STOCKFISH (COÛTS FOCUS) ──────────────────────
+  // ── ACTIVATION STOCKFISH (COÛTS FOCUS + PÉNALITÉ MAX) ──────
 
   /**
-   * Active l'analyse Stockfish payante avec coût ajusté par modificateurs.
-   * Remet le compteur consécutif à 0 mais garde le bouton Flow State visible.
+   * Active l'analyse Stockfish.
+   * - Coût Focus : gratuit si le palier Flow le permet, sinon coût standard.
+   * - Pénalité max : réduit this.max (permanent pour la partie en cours).
+   * - Flow State : sortie (ou descente à III si en Flow MAX).
+   *
    * @param {number} level - 1, 2, ou 3
    * @returns {boolean} true si activé, false si Focus insuffisant
    */
   activateStockfish(level) {
-    const cost = this.getEffectiveSFCost(level);
+    const cost = this._getFlowAdjustedCost(level);
     if (this.current < cost) return false;
 
-    this.apply(-cost, `Stockfish niveau ${level} activé`);
+    // Appliquer le coût Focus
+    if (cost > 0) {
+      this.apply(-cost, `Stockfish N${level}`);
+    } else {
+      this._log(0, `Stockfish N${level} (gratuit en Flow)`);
+    }
+
+    // Pénalité permanente au Focus max (composée)
+    const penalty = this.SF_MAX_PENALTIES[level];
+    this.max = Math.max(20, Math.round(this.max * (1 - penalty)));
+
     ChessEngine.setUsedStockfish();
 
-    // Remettre le compteur à 0, retirer bonus passifs, mais garder le bouton
-    if (!this.flowState) {
+    // Gestion du Flow State
+    if (this.flowPalier > 0) {
+      if (this.flowPalier === 4) {
+        // Flow MAX : descend à Flow III au lieu de sortir
+        this.flowPalier = 3;
+        this.consecutiveGoodMoves = this.FLOW_THRESHOLDS[3]; // 7
+        this._updateFlowModifiers();
+        this._log(0, 'Flow State descend à III (usage SF en MAX)');
+      } else {
+        this._exitFlow();
+      }
+    } else {
+      // Hors Flow : remettre le compteur à 0
       this.consecutiveGoodMoves = 0;
-      this._removePassiveBonuses();
-      // flowStateButtonVisible reste inchangé — le bouton reste s'il était visible
     }
 
     return true;
@@ -374,35 +444,29 @@ const FocusSystem = {
   /**
    * Récupération inter-parties : lit les valeurs sauvegardées dans CareerManager,
    * applique une récupération de 40% de la différence avec focusMax.
-   * Formule : focusCurrent + (focusMax - focusCurrent) * 0.4
+   * Focus max revient toujours à 100 (pénalités N sont par partie).
    */
   resetForGame() {
-    // Lire les valeurs persistées
+    // Lire les valeurs persistées pour le current, mais remettre max à 100
     if (typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()) {
       const player = CareerManager.getPlayer();
       const savedCurrent = player.focusCurrent;
-      const savedMax     = player.focusMax;
-      this.max = savedMax;
-      const recovery = savedCurrent + (savedMax - savedCurrent) * 0.4;
-      this.current = Math.min(savedMax, Math.round(recovery));
+      this.max = 100; // Reset max chaque partie (pénalités SF sont intra-partie)
+      const recovery = savedCurrent + (100 - savedCurrent) * 0.4;
+      this.current = Math.min(100, Math.round(recovery));
     } else {
-      const recovery = Math.min(this.max, this.current + this.max * 0.4);
+      this.max = 100;
+      const recovery = Math.min(100, this.current + 100 * 0.4);
       this.current = Math.round(recovery);
     }
 
-    // Réinitialiser le Flow State
-    this.consecutiveGoodMoves   = 0;
-    this.flowState              = false;
-    this.flowStateCoupsRestants = 0;
-    this.flowStateButtonVisible = false;
-    this.flowDecayRemaining     = 0;
-    this.flowDecayPerMove       = 0;
-    this._flowMaxBase           = 0;
-    this.shakeTriggered         = false;
+    // Réinitialiser le Flow State et le momentum
+    this.consecutiveGoodMoves = 0;
+    this.flowPalier           = 0;
+    this.shakeTriggered       = false;
 
     // Nettoyer les modificateurs temporaires
-    this.removeModifier('flow-passive-sf');
-    this.removeModifier('flow-active-sf');
+    this.removeModifier('flow-gain-mult');
 
     // Mettre à jour le modificateur de Confiance
     this._updateConfianceModifier();
@@ -412,14 +476,6 @@ const FocusSystem = {
 
   // ── CONFIANCE (STAT CACHÉE) ──────────────────────────────────
 
-  /**
-   * Met à jour les modificateurs basés sur la Confiance du joueur.
-   * Passe par le tableau modifiers[] pour compatibilité Phase 7.
-   *
-   * Confiance > 70 : gains de Focus × 1.4
-   * Confiance 30-70 : neutre
-   * Confiance < 30 : gains × 0.7, pertes × 1.2
-   */
   _updateConfianceModifier() {
     this.removeModifier('confiance-gain');
     this.removeModifier('confiance-loss');
@@ -440,71 +496,79 @@ const FocusSystem = {
 
   /**
    * Retourne l'état complet du Flow State pour l'UI.
-   * @returns {{ available: boolean, active: boolean, coupsRestants: number,
-   *             consecutiveGoodMoves: number, bonusPassif: number }}
+   * @returns {{ palier: number, consecutiveGoodMoves: number,
+   *             threshold: number, nextPalierAt: number }}
    */
   getFlowStateInfo() {
+    const nextThresholds = { 0: 3, 1: 5, 2: 7, 3: 10, 4: Infinity };
     return {
-      available:            this.flowStateButtonVisible,
-      active:               this.flowState,
-      coupsRestants:        this.flowStateCoupsRestants,
+      palier:               this.flowPalier,
       consecutiveGoodMoves: this.consecutiveGoodMoves,
-      bonusPassif:          this._getPassiveLevel(),
+      threshold:            this._getGoodMoveThreshold(),
+      nextPalierAt:         nextThresholds[this.flowPalier],
+      maxPenalty:            Math.round((1 - this.max / 100) * 100),
     };
   },
 
   // ── RENDU ──────────────────────────────────────────────────
 
-  /**
-   * Met à jour la barre visuelle Focus, les boutons Stockfish,
-   * l'UI du Flow State et les effets visuels de zone.
-   */
   render() {
-    const pct     = this.max > 0 ? Math.round((this.current / this.max) * 100) : 0;
     const zone    = this.getZone();
     const bar     = document.getElementById('focus-bar');
     const barWrap = document.getElementById('focus-bar-wrap');
     const val     = document.getElementById('focus-value');
     if (!bar || !val) return;
 
-    // ── Barre principale (vert + segment doré en flex) ──
-    const goldBar = document.getElementById('focus-bar-gold');
-    if (this.flowState && this.current > this.max) {
-      // Mode Flow State : deux segments (vert 77% max + doré 23% max)
-      const greenPct = Math.min(this.current / this.max, 1) * 77;
-      const goldPct  = Math.min(Math.max(0, (this.current - this.max) / (this.max * 0.3)), 1) * 23;
+    // ── Barre principale (vert + segment doré en Flow) ──
+    const goldBar    = document.getElementById('focus-bar-gold');
+    const effMax     = this._getEffectiveMax();
+    const inFlowOver = this.flowPalier > 0 && this.current > this.max;
+
+    if (inFlowOver) {
+      const greenPct = Math.min(this.current / effMax, this.max / effMax) * 100;
+      const goldPct  = Math.min(Math.max(0, (this.current - this.max) / effMax), 1) * 100;
       bar.style.width           = greenPct + '%';
       bar.style.backgroundColor = zone.color;
       bar.style.background      = zone.color;
       bar.style.borderRadius    = '6px 0 0 6px';
-      if (goldBar) { goldBar.style.width = goldPct + '%'; }
+      if (goldBar) goldBar.style.width = goldPct + '%';
       if (barWrap) barWrap.style.overflow = 'hidden';
     } else {
-      bar.style.width           = Math.min(100, pct) + '%';
+      const displayPct = effMax > 0 ? Math.min(100, (this.current / effMax) * 100) : 0;
+      bar.style.width           = displayPct + '%';
       bar.style.backgroundColor = zone.color;
       bar.style.background      = zone.color;
       bar.style.borderRadius    = '6px';
-      if (goldBar) { goldBar.style.width = '0'; }
+      if (goldBar) goldBar.style.width = '0';
       if (barWrap) barWrap.style.overflow = 'hidden';
     }
 
     // ── Texte du focus ──
-    val.textContent = Math.round(this.current) + '%  — ' + zone.label;
+    const maxPenalty = Math.round((1 - this.max / 100) * 100);
+    let focusText = Math.round(this.current) + '%  — ' + zone.label;
+    if (maxPenalty > 0) {
+      focusText += ` (max: ${this.max}%)`;
+    }
+    val.textContent = focusText;
 
-    // ── Bordure pulsante pendant Flow State actif ──
+    // ── Pulsation Flow State actif ──
     if (barWrap) {
-      barWrap.classList.toggle('flow-pulse', this.flowState);
+      barWrap.classList.toggle('flow-pulse', this.flowPalier > 0);
     }
 
     // ── Statut Flow State sous la jauge ──
     const flowStatus = document.getElementById('flow-status');
     if (flowStatus) {
-      const info = this.getFlowStateInfo();
-      if (info.active) {
+      if (this.flowPalier > 0) {
+        const names = ['', 'I', 'II', 'III', 'MAX'];
+        const info  = this.getFlowStateInfo();
+        const progressText = this.flowPalier < 4
+          ? ` (${this.consecutiveGoodMoves}/${info.nextPalierAt})`
+          : '';
         flowStatus.innerHTML = '<span class="badge badge-warning badge-lg flow-badge-active">' +
-          `Flow State actif ! (${info.coupsRestants} coups restants)</span>`;
-      } else if (info.bonusPassif > 0) {
-        flowStatus.textContent = `Flow state level ${info.bonusPassif}`;
+          `Flow ${names[this.flowPalier]}${progressText}</span>`;
+      } else if (this.consecutiveGoodMoves >= 1) {
+        flowStatus.textContent = `Momentum : ${this.consecutiveGoodMoves}/3`;
         flowStatus.className   = 'flow-status flow-status-passive';
       } else {
         flowStatus.textContent = '';
@@ -512,11 +576,9 @@ const FocusSystem = {
       }
     }
 
-    // ── Bouton Flow State ──
+    // ── Bouton Flow State (caché — activation automatique maintenant) ──
     const flowBtn = document.getElementById('btn-flow-state');
-    if (flowBtn) {
-      flowBtn.classList.toggle('hidden', !(this.flowStateButtonVisible && !this.flowState));
-    }
+    if (flowBtn) flowBtn.classList.add('hidden');
 
     // ── Boutons Stockfish avec coûts effectifs ──
     const sfLabels = { 1: 'Évaluateur de coup', 2: 'Guide pièce', 3: 'Meilleur coup' };
@@ -525,21 +587,28 @@ const FocusSystem = {
       const tooltip = document.getElementById('tooltip-sf' + lvl);
       if (!btn) return;
 
-      const effectiveCost = this.getEffectiveSFCost(lvl);
-      const baseCost      = this.SF_COSTS[lvl];
-      const insufficient  = this.current < effectiveCost;
+      const flowCost     = this._getFlowAdjustedCost(lvl);
+      const baseCost     = this.SF_COSTS[lvl];
+      const isFree       = flowCost === 0;
+      const insufficient = this.current < flowCost;
       btn.disabled = insufficient;
 
-      if (effectiveCost < baseCost) {
-        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (-${effectiveCost}% au lieu de ${baseCost}%)`;
+      if (isFree) {
+        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (GRATUIT ⚡)`;
+      } else if (flowCost < baseCost) {
+        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (-${flowCost}% au lieu de ${baseCost}%)`;
       } else {
         btn.textContent = `N${lvl} — ${sfLabels[lvl]} (-${baseCost}%)`;
       }
 
       if (tooltip) {
-        tooltip.dataset.tip = insufficient
-          ? `Focus insuffisant (${effectiveCost}% requis)`
-          : '';
+        if (insufficient) {
+          tooltip.dataset.tip = `Focus insuffisant (${flowCost}% requis)`;
+        } else if (isFree) {
+          tooltip.dataset.tip = 'Gratuit en Flow State — mais sort du Flow !';
+        } else {
+          tooltip.dataset.tip = '';
+        }
       }
     });
 
@@ -549,7 +618,7 @@ const FocusSystem = {
       focusBarWrap.classList.toggle('focus-zone-black', zone.min === 0 && zone.max === 5);
     }
 
-    // ── Tremblement ponctuel de la barre de focus (une seule fois par partie) ──
+    // ── Tremblement ponctuel (une seule fois par partie) ──
     if (focusBarWrap && zone.min === 0 && zone.max === 5 && !this.shakeTriggered) {
       this.shakeTriggered = true;
       focusBarWrap.classList.remove('focus-exhausted');

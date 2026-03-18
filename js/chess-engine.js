@@ -114,7 +114,7 @@ const ChessEngine = (() => {
    * puis appelle FocusSystem.evaluateMoveDelta().
    * Le joueur n'attend jamais cette fonction.
    */
-  async function _runFocusEval(fenAfter, sfUsedFlag) {
+  async function _runFocusEval(fenAfter, sfUsedFlag, capturedPiece) {
     _bgEvalRunning = true;
 
     // Récupérer cpBefore depuis le prefetch (peut encore être en cours)
@@ -131,8 +131,7 @@ const ChessEngine = (() => {
     const deltaCp = cpBefore + cpAfter;
     console.log(`[Engine] cpBefore=${cpBefore}  cpAfter=${cpAfter}(adv)  delta=${deltaCp}`);
 
-    // Bug 2 fix : passer le flag capturé au moment du coup (pas un flag mutable)
-    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag);
+    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null);
 
     _bgEvalRunning = false;
 
@@ -248,7 +247,7 @@ const ChessEngine = (() => {
 
       // Évaluer le Focus uniquement pour les coups du joueur humain
       if (colorBefore === _playerColor) {
-        _runFocusEval(_game.fen(), sfFlag);
+        _runFocusEval(_game.fen(), sfFlag, move.captured || null);
       } else {
         // Coup adverse — lancer le prefetch du meilleur coup directement
         _launchBestMovePrefetch();
