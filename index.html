@@ -122,10 +122,15 @@
         </div>
         <div id="focus-section">
           <div class="label">Focus</div>
+          <button id="btn-flow-state" class="flow-btn hidden">
+            ⚡ Entrer en Flow State
+          </button>
           <div id="focus-bar-wrap">
             <div id="focus-bar"></div>
+            <div id="focus-bar-gold"></div>
           </div>
           <div id="focus-value">100%</div>
+          <div id="flow-status" class="flow-status"></div>
         </div>
         <div id="stockfish-section">
           <div class="label">Analyse Stockfish</div>
@@ -230,12 +235,42 @@
     </div>
   </dialog>
 
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL : REVUE POST-PARTIE (DaisyUI dialog)
+  ══════════════════════════════════════════════════════════════ -->
+  <dialog id="modal-review" class="modal">
+    <div class="modal-box w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-base-200">
+      <h2 class="text-xl font-bold mb-4">Revue post-partie</h2>
+
+      <!-- Barre de progression pendant l'analyse -->
+      <div id="review-progress-wrap">
+        <progress id="review-progress" class="progress progress-primary w-full"
+                  value="0" max="100"></progress>
+        <p id="review-progress-text" class="text-sm text-center mt-2 opacity-60">
+          Analyse en cours…
+        </p>
+      </div>
+
+      <!-- Résultats (masqués pendant l'analyse) -->
+      <div id="review-results" class="hidden">
+        <div id="review-chart" class="mb-6 max-h-64 overflow-y-auto"></div>
+        <h3 class="text-lg font-bold mb-3">Moments clés</h3>
+        <div id="review-moments" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4"></div>
+      </div>
+
+      <div class="modal-action">
+        <button id="btn-close-review" class="btn">Fermer</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ── SCRIPTS (ordre de dépendance) ── -->
   <script src="lib/chess.js"></script>
   <script src="js/save-manager.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
   <script src="js/chess-engine.js"></script>
+  <script src="js/review-manager.js"></script>
   <script src="js/ui-manager.js"></script>
 
 </body>

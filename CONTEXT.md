@@ -51,10 +51,11 @@ Phase 8 — Formats Bullet/Blitz/Rapid/Classique, polish, PWA, déploiement
 
 Où j'en suis actuellement
 Phase 1 terminée : échiquier fonctionnel (roque, promotion, échec, historique).
-Phase 2 terminée : personnage créé, persistance localStorage opérationnelle,
-formule Elo FIDE implémentée, dashboard principal avec stats du joueur.
-chess-engine.js, ui-manager.js, career-manager.js et save-manager.js sont opérationnels.
-Je commence maintenant la Phase 3a.
+Phase 2 terminée : personnage créé, persistance localStorage, formule Elo FIDE, dashboard.
+Phase 3a terminée : Stockfish en Web Worker, évaluation centipawns, jauge Focus 
+avec 5 zones visuelles, 3 niveaux d'analyse (évaluateur, guide pièce, flèche),
+calcul anticipé du meilleur coup, flag usedStockfishThisTurn opérationnel.
+Je commence maintenant la Phase 3b.
 
 Comment tu dois travailler avec moi
 Ce que j'attends de toi :

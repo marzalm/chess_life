@@ -86,6 +86,15 @@ const CareerManager = (() => {
       return { ...visible };
     },
 
+    /**
+     * Retourne l'état complet du joueur, y compris la confiance (stat cachée).
+     * Utilisé par FocusSystem pour appliquer les modificateurs de confiance.
+     * @returns {object|null}
+     */
+    getPlayer() {
+      return _state ? { ..._state } : null;
+    },
+
     // ── FORMULE ELO FIDE ─────────────────────────────────────────
 
     /**
@@ -153,6 +162,16 @@ const CareerManager = (() => {
     syncFocus() {
       _state.focusCurrent = FocusSystem.current;
       _state.focusMax     = FocusSystem.max;
+      _save();
+    },
+
+    /**
+     * Modifie la confiance du joueur. Plafonné entre 0 et 100.
+     * Utilisable depuis la console ou les événements narratifs (Phase 6).
+     * @param {number} value - nouvelle valeur de confiance
+     */
+    setConfiance(value) {
+      _state.confiance = Math.max(0, Math.min(100, value));
       _save();
     },
 

@@ -334,6 +334,8 @@ const UIManager = {
     document.getElementById('moves-list').innerHTML = '';
     document.getElementById('sf-feedback').textContent =
       'Active Stockfish pour analyser la position.';
+    document.getElementById('flow-status').textContent = '';
+    document.getElementById('flow-status').className   = 'flow-status';
 
     this.renderBoard();
     this.showStatus('À Blancs de jouer.');
@@ -375,11 +377,15 @@ const UIManager = {
       return;
     }
 
-    const result = ChessEngine.getGameResult();
+    const result      = ChessEngine.getGameResult();
+    const playerColor = ChessEngine.getPlayerColor();
     let msg = '';
+    let won = false;
 
     if (result === 'checkmate') {
-      const winner = ChessEngine.getTurn() === 'w' ? 'Noirs' : 'Blancs';
+      const loserColor = ChessEngine.getTurn();
+      won = loserColor !== playerColor;
+      const winner = loserColor === 'w' ? 'Noirs' : 'Blancs';
       msg = `Échec et mat — ${winner} gagnent !`;
     } else if (result === 'stalemate') {
       msg = 'Pat — partie nulle.';
@@ -387,9 +393,15 @@ const UIManager = {
       msg = 'Partie nulle.';
     }
 
-    FocusSystem.onGameEnd(false);
+    FocusSystem.onGameEnd(won);
     CareerManager.syncFocus();
     this.showStatus(msg);
+
+    // Lancer la revue post-partie automatiquement
+    const history = ChessEngine.getHistory();
+    if (history.length >= 4) {
+      ReviewManager.startReview(history);
+    }
   },
 
   // ── STOCKFISH VISUEL ─────────────────────────────────────────
@@ -590,6 +602,18 @@ const UIManager = {
       } else {
         document.getElementById('sf-feedback').textContent = 'N3 — Aucun coup trouvé.';
       }
+    };
+
+    // Flow State — activation
+    document.getElementById('btn-flow-state').onclick = () => {
+      FocusSystem.activateFlowState();
+    };
+
+    // Revue post-partie — fermeture
+    document.getElementById('btn-close-review').onclick = () => {
+      ReviewManager.stopReview();
+      CareerManager.syncFocus();
+      this.showScreen('dashboard');
     };
   },
 

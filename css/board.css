@@ -206,6 +206,22 @@ body {
 .sf-eval-badge.eval-blunder    { background: #991b1b; color: #fff; }
 .sf-eval-badge.eval-loading    { background: #555; color: #ccc; }
 
+/* ── ZONE NOIRE : tremblement continu (0-5%) ── */
+
+@keyframes zone-black-shake {
+  0%, 85%, 100% { transform: translate(0, 0); }
+  87%  { transform: translate(-3px, 0); }
+  89%  { transform: translate(3px, 0); }
+  91%  { transform: translate(-3px, 0); }
+  93%  { transform: translate(3px, 0); }
+  95%  { transform: translate(-3px, 0); }
+  97%  { transform: translate(3px, 0); }
+}
+
+#board-container.focus-zone-black {
+  animation: zone-black-shake 2s ease-in-out infinite;
+}
+
 /* ── PIÈCES CAPTURÉES ── */
 
 #captured-white,

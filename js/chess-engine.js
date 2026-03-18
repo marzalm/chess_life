@@ -314,6 +314,18 @@ const ChessEngine = (() => {
       return cpBefore + cpAfter;
     },
 
+    // ── ÉVALUATION POUR LA REVUE POST-PARTIE ──────────────────────
+
+    /**
+     * Évalue une position et retourne { cp, bestMove }.
+     * Utilisé par ReviewManager pour analyser chaque position.
+     * @param {string} fen
+     * @returns {Promise<{ cp: number, bestMove: string|null }>}
+     */
+    evaluateForReview(fen) {
+      return _evaluateWithMove(fen, MANUAL_DEPTH);
+    },
+
     // ── FONCTIONS DE LECTURE ──────────────────────────────────────
 
     getLegalMoves(square) {
