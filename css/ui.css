@@ -1,18 +1,56 @@
+/* ════════════════════════════════════════════════════════════════
+   CHESS LIFE — UI.CSS — Style pixel art RPG (Stardew Valley)
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── VARIABLES PIXEL ART ── */
+
+:root {
+  --px-bg:         #1a1a2e;
+  --px-panel:      #2a1f3d;
+  --px-panel-dark: #1e152e;
+  --px-border:     #6b5a8a;
+  --px-border-hi:  #9b8aba;
+  --px-text:       #e0d8c8;
+  --px-text-dim:   #8a7f99;
+  --px-accent:     #e8c98a;
+  --px-gold:       #fbbf24;
+  --px-green:      #4ade80;
+  --px-red:        #e24b4a;
+  --px-blue:       #60a5fa;
+  --px-wood:       #5c3a1e;
+  --px-wood-light: #8b6238;
+}
+
+/* ── PANNEAU RPG — cadre de fenêtre style pixel ── */
+
+.rpg-panel {
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 12px 14px;
+}
+
 /* ── SIDEBAR ── */
 
 #sidebar {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   width: 220px;
   flex-shrink: 0;
 }
 
-.label {
-  font-size: 11px;
+/* Labels sidebar uniquement — ne pas écraser les labels DaisyUI des modals */
+#sidebar > div > .label,
+#move-history > .label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: #888;
+  color: var(--px-accent);
   margin-bottom: 6px;
 }
 
@@ -20,38 +58,45 @@
 
 #player-info,
 #opponent-info {
-  background: #16213e;
-  border-radius: 8px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 12px 14px;
-  border: 1px solid #2a2a4a;
 }
 
 #player-elo,
 #opponent-elo {
-  font-size: 28px;
-  font-weight: bold;
-  color: #e0e0e0;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 18px;
+  font-weight: normal;
+  color: var(--px-text);
 }
 
 #opponent-name {
-  font-size: 14px;
-  color: #aaa;
+  font-size: 13px;
+  color: var(--px-text-dim);
   margin-bottom: 2px;
 }
 
 /* ── FOCUS ── */
 
 #focus-section {
-  background: #16213e;
-  border-radius: 8px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 12px 14px;
-  border: 1px solid #2a2a4a;
 }
 
 #focus-bar-wrap {
-  background: #2a2a4a;
-  border-radius: 6px;
-  height: 14px;
+  background: #1a1127;
+  border: 2px solid var(--px-border);
+  height: 16px;
   overflow: hidden;
   margin-bottom: 6px;
   display: flex;
@@ -61,58 +106,62 @@
   height: 100%;
   width: 100%;
   background: #1d9e75;
-  border-radius: 6px;
-  transition: width 0.4s ease, background-color 0.4s ease;
+  /* Transition nette, pas de dégradé — pixel art */
+  transition: width 0.1s steps(20);
   flex-shrink: 0;
 }
 
 #focus-bar-gold {
   height: 100%;
   width: 0;
-  background: linear-gradient(90deg, #fbbf24, #f59e0b);
-  border-radius: 0 6px 6px 0;
-  transition: width 0.4s ease;
+  background: var(--px-gold);
+  transition: width 0.1s steps(20);
   flex-shrink: 0;
 }
 
 #focus-value {
-  font-size: 13px;
-  font-weight: bold;
-  color: #e0e0e0;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  color: var(--px-text);
 }
 
 /* ── FLOW STATE ── */
 
 .flow-btn {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  background: var(--px-gold);
   color: #1a1a1a;
-  border: none;
-  border-radius: 6px;
+  border: 3px solid #d4a017;
   padding: 8px 12px;
-  font-size: 12px;
-  font-weight: bold;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
   cursor: pointer;
   width: 100%;
   margin-bottom: 8px;
-  animation: flow-pulse-btn 1.5s ease-in-out infinite;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+  transition: box-shadow 0.05s, transform 0.05s;
 }
 
 .flow-btn:hover {
   filter: brightness(1.1);
 }
 
+.flow-btn:active {
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.4);
+  transform: translate(2px, 2px);
+}
+
 @keyframes flow-pulse-btn {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
-  50%      { box-shadow: 0 0 12px 4px rgba(251, 191, 36, 0.6); }
+  0%, 100% { box-shadow: 3px 3px 0 rgba(0,0,0,0.4), 0 0 0 0 rgba(251, 191, 36, 0.4); }
+  50%      { box-shadow: 3px 3px 0 rgba(0,0,0,0.4), 0 0 8px 2px rgba(251, 191, 36, 0.6); }
 }
 
 #focus-bar-wrap.flow-pulse {
-  animation: flow-border-pulse 1s ease-in-out infinite;
+  animation: flow-border-pulse 1s steps(2) infinite;
 }
 
 @keyframes flow-border-pulse {
-  0%, 100% { box-shadow: 0 0 4px #22c55e; }
-  50%      { box-shadow: 0 0 14px #4ade80; }
+  0%, 100% { border-color: var(--px-border); }
+  50%      { border-color: var(--px-green); }
 }
 
 .flow-status {
@@ -122,44 +171,52 @@
 }
 
 .flow-status-passive {
-  color: #4ade80;
+  color: var(--px-green);
 }
 
 .flow-badge-active {
-  animation: flow-badge-glow 1.2s ease-in-out infinite;
+  animation: flow-badge-glow 1.2s steps(2) infinite;
 }
 
 @keyframes flow-badge-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.4); }
-  50%      { box-shadow: 0 0 12px rgba(251, 191, 36, 0.8); }
+  0%, 100% { box-shadow: 3px 3px 0 rgba(0,0,0,0.4); }
+  50%      { box-shadow: 3px 3px 0 rgba(0,0,0,0.4), 0 0 8px rgba(251, 191, 36, 0.8); }
 }
 
 /* ── STOCKFISH ── */
 
 #stockfish-section {
-  background: #16213e;
-  border-radius: 8px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 12px 14px;
-  border: 1px solid #2a2a4a;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .sf-btn {
-  background: #0f3460;
-  color: #e0e0e0;
-  border: 1px solid #2a5298;
-  border-radius: 6px;
+  background: var(--px-panel-dark);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
   padding: 7px 10px;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s, opacity 0.15s;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+  transition: box-shadow 0.05s, transform 0.05s, background 0.05s;
 }
 
 .sf-btn:hover:not(:disabled) {
-  background: #16407a;
+  background: #352a4d;
+}
+
+.sf-btn:active:not(:disabled) {
+  box-shadow: 0px 0px 0 rgba(0,0,0,0.4);
+  transform: translate(2px, 2px);
 }
 
 .sf-btn:disabled {
@@ -169,8 +226,8 @@
 
 #sf-feedback {
   margin-top: 4px;
-  font-size: 12px;
-  color: #aaa;
+  font-size: 11px;
+  color: var(--px-text-dim);
   line-height: 1.5;
   min-height: 36px;
 }
@@ -184,46 +241,70 @@
 }
 
 #btn-new-game {
-  background: #2e5fa3;
-  color: white;
-  border: none;
-  border-radius: 6px;
+  background: #3a6b35;
+  color: #fff;
+  border: 3px solid #2d5229;
   padding: 10px;
-  font-size: 14px;
-  font-weight: bold;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
   cursor: pointer;
-  transition: background 0.15s;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+  transition: box-shadow 0.05s, transform 0.05s;
 }
 
 #btn-new-game:hover {
-  background: #3a74c8;
+  background: #4a8a44;
+}
+
+#btn-new-game:active {
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.4);
+  transform: translate(2px, 2px);
 }
 
 #game-status {
-  font-size: 12px;
-  color: #aaa;
+  font-size: 11px;
+  color: var(--px-text-dim);
   text-align: center;
   min-height: 18px;
 }
 
-/* ── HISTORIQUE ── */
+/* ── HISTORIQUE DES COUPS ── */
 
 #move-history {
-  background: #16213e;
-  border-radius: 8px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 12px 14px;
-  border: 1px solid #2a2a4a;
   width: 160px;
   flex-shrink: 0;
   max-height: 620px;
   overflow-y: auto;
 }
 
+/* Scrollbar pixel art */
+#move-history::-webkit-scrollbar {
+  width: 10px;
+}
+#move-history::-webkit-scrollbar-track {
+  background: var(--px-panel-dark);
+  border-left: 2px solid var(--px-border);
+}
+#move-history::-webkit-scrollbar-thumb {
+  background: var(--px-border);
+  border: 1px solid var(--px-border-hi);
+}
+#move-history::-webkit-scrollbar-thumb:hover {
+  background: var(--px-border-hi);
+}
+
 #moves-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 13px;
+  font-size: 12px;
   font-family: monospace;
 }
 
@@ -234,12 +315,12 @@
 }
 
 .move-num {
-  color: #555;
+  color: var(--px-text-dim);
   min-width: 24px;
 }
 
 .move-white {
-  color: #f0d9b5;
+  color: var(--px-accent);
   min-width: 48px;
 }
 
@@ -248,13 +329,18 @@
 }
 
 /* ── PROMOTION ── */
-/* Le modal est géré par DaisyUI <dialog> — seuls les styles des pièces restent ici */
 
 .promo-piece {
-  font-size: 56px;
   cursor: pointer;
-  transition: transform 0.1s;
+  transition: transform 0.08s;
   line-height: 1;
+}
+
+.promo-piece img {
+  width: 64px;
+  height: 64px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .promo-piece:hover {
@@ -271,7 +357,11 @@
   align-items: flex-start;
   justify-content: center;
   padding: 32px 16px 64px;
-  background: #0f0f1a;
+  background-color: var(--px-bg);
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 4px 4px;
 }
 
 .dashboard-wrap {
@@ -279,7 +369,7 @@
   max-width: 680px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 /* ── En-tête ── */
@@ -292,58 +382,88 @@
 }
 
 .dash-name {
-  font-size: 28px;
-  font-weight: 800;
-  color: #f0f0f0;
-  line-height: 1.1;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 16px;
+  font-weight: normal;
+  color: var(--px-text);
+  line-height: 1.4;
   margin: 0;
 }
 
 .dash-meta {
-  font-size: 13px;
-  color: #666;
-  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--px-text-dim);
+  margin: 6px 0 0;
 }
 
 .dash-elo-box {
-  background: #16213e;
-  border: 1px solid #2a5298;
-  border-radius: 10px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-gold);
+  box-shadow:
+    inset 1px 1px 0 rgba(251,191,36,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 10px 20px;
   text-align: center;
   flex-shrink: 0;
 }
 
 .dash-elo-label {
-  font-size: 10px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: #666;
+  color: var(--px-gold);
   display: block;
 }
 
 .dash-elo-value {
-  font-size: 36px;
-  font-weight: 900;
-  color: #e0e0e0;
-  line-height: 1.1;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 22px;
+  font-weight: normal;
+  color: var(--px-text);
+  line-height: 1.3;
 }
 
 /* ── Stats DaisyUI ── */
 
 .dash-stats {
-  border-radius: 10px;
+  border-radius: 0 !important;
   overflow: hidden;
-  background: #16213e;
-  border: 1px solid #2a2a4a;
+  background: var(--px-panel) !important;
+  border: 3px solid var(--px-border) !important;
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    3px 3px 0 rgba(0,0,0,0.4) !important;
+}
+
+.dash-stats .stat {
+  border-color: var(--px-border) !important;
+}
+
+.dash-stats .stat-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  color: var(--px-text-dim) !important;
+}
+
+.dash-stats .stat-value {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 14px !important;
+}
+
+.dash-stats .stat-desc {
+  font-size: 10px;
+  color: var(--px-text-dim) !important;
 }
 
 /* ── Compétences ── */
 
 .dash-skills {
-  background: #16213e;
-  border: 1px solid #2a2a4a;
-  border-radius: 10px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -351,10 +471,11 @@
 }
 
 .dash-section-title {
-  font-size: 11px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: #555;
+  letter-spacing: 1px;
+  color: var(--px-accent);
   margin: 0 0 4px;
 }
 
@@ -365,20 +486,35 @@
 }
 
 .skill-name {
-  font-size: 13px;
-  color: #aaa;
+  font-size: 12px;
+  color: var(--px-text-dim);
   min-width: 80px;
 }
 
 .skill-bar {
   flex: 1;
-  height: 8px;
+  height: 10px;
+  border-radius: 0 !important;
+  border: 2px solid var(--px-border);
+  background: var(--px-panel-dark) !important;
+}
+
+/* Override DaisyUI progress bar radius */
+.skill-bar::-webkit-progress-bar {
+  background: var(--px-panel-dark);
+  border-radius: 0;
+}
+.skill-bar::-webkit-progress-value {
+  border-radius: 0;
+}
+.skill-bar::-moz-progress-bar {
+  border-radius: 0;
 }
 
 .skill-val {
-  font-size: 13px;
-  font-weight: bold;
-  color: #e0e0e0;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  color: var(--px-text);
   min-width: 28px;
   text-align: right;
 }
@@ -389,15 +525,47 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 8px;
+}
+
+/* Override DaisyUI bouton Play — style pixel art */
+#dash-btn-play {
+  font-family: 'Press Start 2P', monospace !important;
+  font-size: 11px !important;
+  border-radius: 0 !important;
+  border: 3px solid #2563eb !important;
+  box-shadow: 4px 4px 0 rgba(0,0,0,0.4) !important;
+  transition: box-shadow 0.05s, transform 0.05s !important;
+}
+
+#dash-btn-play:hover:not(:disabled) {
+  box-shadow: 5px 5px 0 rgba(0,0,0,0.4) !important;
+}
+
+#dash-btn-play:active:not(:disabled) {
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.4) !important;
+  transform: translate(3px, 3px) !important;
+}
+
+#dash-btn-delete {
+  border-radius: 0 !important;
+  font-size: 10px;
+}
+
+/* Barre Maia loading */
+#maia-loading-bar .progress {
+  border-radius: 0 !important;
+  height: 6px;
 }
 
 /* ── Historique ── */
 
 .dash-history {
-  background: #16213e;
-  border: 1px solid #2a2a4a;
-  border-radius: 10px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    3px 3px 0 rgba(0,0,0,0.4);
   padding: 16px 18px;
 }
 
@@ -413,26 +581,26 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 10px;
-  background: #0f1628;
-  border-radius: 6px;
-  font-size: 13px;
+  background: var(--px-panel-dark);
+  border: 2px solid var(--px-border);
+  font-size: 12px;
 }
 
 .history-entry .h-opponent {
-  color: #ccc;
+  color: var(--px-text);
   font-weight: 600;
 }
 
-.history-entry .h-result-win  { color: #1d9e75; font-weight: bold; }
-.history-entry .h-result-loss { color: #e24b4a; font-weight: bold; }
-.history-entry .h-result-draw { color: #888;    font-weight: bold; }
+.history-entry .h-result-win  { color: var(--px-green); font-weight: bold; }
+.history-entry .h-result-loss { color: var(--px-red);   font-weight: bold; }
+.history-entry .h-result-draw { color: var(--px-text-dim); font-weight: bold; }
 
-.history-entry .h-delta-pos { color: #1d9e75; font-size: 12px; }
-.history-entry .h-delta-neg { color: #e24b4a; font-size: 12px; }
+.history-entry .h-delta-pos { color: var(--px-green); font-size: 11px; }
+.history-entry .h-delta-neg { color: var(--px-red);   font-size: 11px; }
 
 .history-empty {
-  font-size: 13px;
-  color: #444;
+  font-size: 12px;
+  color: var(--px-text-dim);
   text-align: center;
   padding: 12px 0;
 }
@@ -446,50 +614,98 @@
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
+  background-color: var(--px-bg);
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 4px 4px;
 }
 
 .back-btn {
   align-self: flex-start;
   margin: 12px 16px 0;
-  color: #666;
+  color: var(--px-text-dim) !important;
+  border-radius: 0 !important;
+  font-size: 12px;
 }
 
 .back-btn:hover {
-  color: #ccc;
+  color: var(--px-text) !important;
 }
-
-/* ════════════════════════════════════════════════════════════════
-   UTILITAIRE
-════════════════════════════════════════════════════════════════ */
 
 /* ════════════════════════════════════════════════════════════════
    FOCUS — tremblement zone épuisée (0-5%)
 ════════════════════════════════════════════════════════════════ */
 
-@keyframes board-shake {
-  0%, 100%  { transform: translate(0, 0); }
-  10%       { transform: translate(-1px, 0); }
-  30%       { transform: translate(1px, -1px); }
-  50%       { transform: translate(-1px, 1px); }
-  70%       { transform: translate(1px, 0); }
-  90%       { transform: translate(-1px, -1px); }
+/* ── ZONE NOIRE : tremblement continu sur la barre de focus ── */
+
+@keyframes focus-bar-shake {
+  0%, 85%, 100% { transform: translate(0, 0); }
+  87%  { transform: translate(-2px, 0); }
+  89%  { transform: translate(2px, 0); }
+  91%  { transform: translate(-2px, 0); }
+  93%  { transform: translate(2px, 0); }
+  95%  { transform: translate(-2px, 0); }
+  97%  { transform: translate(2px, 0); }
 }
 
-#board.focus-exhausted {
-  animation: board-shake 0.15s ease-in-out 20;
+#focus-bar-wrap.focus-zone-black {
+  animation: focus-bar-shake 2s steps(1) infinite;
+}
+
+/* ── Tremblement ponctuel (une fois par partie) ── */
+
+@keyframes focus-bar-burst {
+  0%, 100%  { transform: translate(0, 0); }
+  10%       { transform: translate(-2px, 0); }
+  30%       { transform: translate(2px, -1px); }
+  50%       { transform: translate(-2px, 1px); }
+  70%       { transform: translate(2px, 0); }
+  90%       { transform: translate(-2px, -1px); }
+}
+
+#focus-bar-wrap.focus-exhausted {
+  animation: focus-bar-burst 0.15s steps(1) 20;
 }
 
 /* ════════════════════════════════════════════════════════════════
    REVUE POST-PARTIE
 ════════════════════════════════════════════════════════════════ */
 
+/* Override DaisyUI modal pour style pixel */
+#modal-review .modal-box,
+#modal-create-player .modal-box,
+#promotion-modal .modal-box {
+  border-radius: 0 !important;
+  border: 3px solid var(--px-border) !important;
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    6px 6px 0 rgba(0,0,0,0.5) !important;
+  background: var(--px-panel) !important;
+}
+
+/* Boutons DaisyUI dans les modals */
+#modal-review .btn,
+#modal-create-player .btn,
+#promotion-modal .btn {
+  border-radius: 0 !important;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+}
+
+/* Inputs dans le modal création */
+#modal-create-player .input,
+#modal-create-player .select {
+  border-radius: 0 !important;
+  border: 2px solid var(--px-border) !important;
+  background: var(--px-panel-dark) !important;
+}
+
 .mini-board {
   display: grid;
   grid-template-columns: repeat(8, 28px);
   grid-template-rows: repeat(8, 28px);
-  border-radius: 4px;
   overflow: hidden;
-  border: 1px solid #444;
+  border: 2px solid var(--px-border);
 }
 
 .mini-sq {
@@ -502,13 +718,13 @@
   line-height: 1;
 }
 
-.mini-sq.light { background: #f0d9b5; }
-.mini-sq.dark  { background: #b58863; }
+.mini-sq.light { background: #e8c98a; }
+.mini-sq.dark  { background: #a0522d; }
 
 .review-moment-card {
-  background: #16213e;
-  border: 1px solid #2a2a4a;
-  border-radius: 8px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -525,7 +741,7 @@
 }
 
 .review-move-num {
-  color: #666;
+  color: var(--px-text-dim);
   min-width: 30px;
   text-align: right;
 }
@@ -533,8 +749,8 @@
 .review-bar-wrap {
   flex: 1;
   height: 8px;
-  background: #2a2a4a;
-  border-radius: 4px;
+  background: var(--px-panel-dark);
+  border: 1px solid var(--px-border);
   overflow: hidden;
   position: relative;
 }
@@ -545,18 +761,17 @@
   top: 0;
   width: 1px;
   height: 100%;
-  background: #666;
+  background: var(--px-text-dim);
 }
 
 .review-bar {
   height: 100%;
-  background: linear-gradient(90deg, #e24b4a, #888 50%, #1d9e75);
-  border-radius: 4px;
-  transition: width 0.2s;
+  background: linear-gradient(90deg, var(--px-red), var(--px-text-dim) 50%, var(--px-green));
+  transition: width 0.2s steps(10);
 }
 
 .review-cp {
-  color: #aaa;
+  color: var(--px-text-dim);
   min-width: 44px;
   text-align: right;
   font-family: monospace;
@@ -568,7 +783,7 @@
 .mini-arrow-anim {
   stroke-dasharray: 200;
   stroke-dashoffset: 200;
-  animation: mini-arrow-draw 0.6s ease forwards;
+  animation: mini-arrow-draw 0.6s steps(8) forwards;
 }
 
 @keyframes mini-arrow-draw {
@@ -579,20 +794,107 @@
 
 .review-chart-dot {
   position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
   border: 2px solid #fff;
   cursor: pointer;
   pointer-events: auto;
   z-index: 5;
-  transition: transform 0.15s;
+  transition: transform 0.08s;
 }
 
 .review-chart-dot:hover {
   transform: scale(1.3);
 }
 
+/* ════════════════════════════════════════════════════════════════
+   UTILITAIRE
+════════════════════════════════════════════════════════════════ */
+
 .hidden {
   display: none !important;
+}
+
+/* ── Override global DaisyUI progress bar — coins carrés ── */
+.progress {
+  border-radius: 0 !important;
+}
+.progress::-webkit-progress-bar {
+  border-radius: 0 !important;
+}
+.progress::-webkit-progress-value {
+  border-radius: 0 !important;
+}
+.progress::-moz-progress-bar {
+  border-radius: 0 !important;
+}
+
+/* ── Scrollbar pixel art globale ── */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--px-panel-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--px-border);
+  border: 1px solid var(--px-border-hi);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--px-border-hi);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   BOUTON MUSIQUE — pixel art toggle fixé en bas à droite
+════════════════════════════════════════════════════════════════ */
+
+.music-toggle {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 9999;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  padding: 10px 14px;
+  background: var(--px-panel);
+  color: var(--px-text-dim);
+  border: 3px solid var(--px-border);
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    4px 4px 0 #0d0a14;
+  transition: transform 0.05s, box-shadow 0.05s;
+  image-rendering: pixelated;
+}
+
+.music-toggle:hover {
+  color: var(--px-accent);
+  border-color: var(--px-accent);
+  background: #352a4d;
+}
+
+.music-toggle:active {
+  transform: translate(2px, 2px);
+  box-shadow: inset 1px 1px 0 var(--px-border-hi);
+}
+
+.music-toggle.music-on {
+  color: var(--px-accent);
+  border-color: var(--px-accent);
+  background: #352a4d;
+  box-shadow:
+    inset 1px 1px 0 var(--px-border-hi),
+    4px 4px 0 #0d0a14,
+    0 0 12px rgba(232, 201, 138, 0.35);
+}
+
+@keyframes music-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+.music-toggle.music-on {
+  animation: music-pulse 2s steps(3) infinite;
 }

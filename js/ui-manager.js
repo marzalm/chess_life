@@ -11,6 +11,11 @@ const UIManager = {
   lastMove:         null,
   pendingPromotion: null,
 
+  // ── ÉTAT IA ────────────────────────────────────────────────
+  _aiThinking:    false,
+  _opponentName:  null,
+  _opponentElo:   null,
+
   // ── ÉTAT STOCKFISH VISUEL ──────────────────────────────────
   sfEvalActive:     false,   // N1 : mode évaluateur actif
   sfEvalConsumed:   false,   // N1 : l'unique évaluation a été utilisée
@@ -19,9 +24,32 @@ const UIManager = {
   sfArrow:          null,    // N3 : { from, to } de la flèche
 
   PIECES: {
+    wK: 'assets/pieces/wK.png', wQ: 'assets/pieces/wQ.png',
+    wR: 'assets/pieces/wR.png', wB: 'assets/pieces/wB.png',
+    wN: 'assets/pieces/wN.png', wP: 'assets/pieces/wP.png',
+    bK: 'assets/pieces/bK.png', bQ: 'assets/pieces/bQ.png',
+    bR: 'assets/pieces/bR.png', bB: 'assets/pieces/bB.png',
+    bN: 'assets/pieces/bN.png', bP: 'assets/pieces/bP.png',
+  },
+
+  // Unicode fallback pour promotion modal et pièces capturées
+  PIECES_UNICODE: {
     wK: '♔', wQ: '♕', wR: '♖', wB: '♗', wN: '♘', wP: '♙',
     bK: '♚', bQ: '♛', bR: '♜', bB: '♝', bN: '♞', bP: '♟',
   },
+
+  _OPPONENT_NAMES: [
+    'Viktor Antonov', 'Svetlana Karpova', 'Rajesh Anand',
+    'Magnus Lindström', 'Isabella Ferrari', 'Chen Wei',
+    'Alexandre Dubois', 'Yuki Tanaka', 'David Fischer',
+    'Olga Petrova', 'Hans Müller', 'Carmen López',
+    'Nikolai Sokolov', 'Priya Sharma', 'Thomas Eriksen',
+    'Fatima Al-Rashid', 'Luca Moretti', 'Anya Volkova',
+    'James Morrison', 'Sofia Papadopoulos', 'Boris Ivanov',
+    'Mei Lin Zhang', 'André Philidor', 'Eva Steinitz',
+    'Sergei Botvinnik', 'Amara Diallo', 'Kim Hyun-woo',
+    'Maria Capablanca', 'Emil Lasker', 'Aisha Patel',
+  ],
 
   // ── INITIALISATION ───────────────────────────────────────────
 
@@ -76,6 +104,7 @@ const UIManager = {
     this._setSkillBar('ouvertures', stats.ouvertures);
     this._setSkillBar('endgame',    stats.endgame);
     this._renderRecentHistory(parties);
+    this._updateMaiaUI(MaiaEngine.getStatus(), MaiaEngine.getProgress());
   },
 
   _setSkillBar(key, value) {
@@ -169,9 +198,11 @@ const UIManager = {
         }
 
         if (piece) {
-          const p = document.createElement('div');
-          p.className   = 'piece piece-' + piece.color;
-          p.textContent = this.PIECES[piece.color + piece.type.toUpperCase()];
+          const p = document.createElement('img');
+          p.className = 'piece';
+          p.src       = this.PIECES[piece.color + piece.type.toUpperCase()];
+          p.alt       = piece.color + piece.type.toUpperCase();
+          p.draggable = false;
           el.appendChild(p);
         }
 
@@ -245,6 +276,8 @@ const UIManager = {
 
   onSquareClick(square) {
     if (ChessEngine.isGameOver()) return;
+    if (this._aiThinking) return;
+    if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) return;
 
     const piece = ChessEngine.getPiece(square);
     const turn  = ChessEngine.getTurn();
@@ -292,17 +325,21 @@ const UIManager = {
     const modal   = document.getElementById('promotion-modal');
     const choices = document.getElementById('promotion-choices');
 
-    const pieces = color === 'w'
-      ? ['♕', '♖', '♗', '♘']
-      : ['♛', '♜', '♝', '♞'];
+    const pieceKeys = color === 'w'
+      ? ['wQ', 'wR', 'wB', 'wN']
+      : ['bQ', 'bR', 'bB', 'bN'];
     const types = ['q', 'r', 'b', 'n'];
 
     choices.innerHTML = '';
-    pieces.forEach((p, i) => {
-      const el       = document.createElement('div');
-      el.className   = 'promo-piece';
-      el.textContent = p;
-      el.onclick     = () => {
+    pieceKeys.forEach((key, i) => {
+      const el   = document.createElement('div');
+      el.className = 'promo-piece';
+      const img  = document.createElement('img');
+      img.src    = this.PIECES[key];
+      img.alt    = key;
+      img.draggable = false;
+      el.appendChild(img);
+      el.onclick = () => {
         modal.close();
         const pending         = this.pendingPromotion;
         this.pendingPromotion = null;
@@ -323,14 +360,18 @@ const UIManager = {
     this.legalMoves       = [];
     this.lastMove         = null;
     this.pendingPromotion = null;
+    this._aiThinking      = false;
     this._clearStockfishVisuals();
 
     FocusSystem.resetForGame();
 
+    // Générer l'adversaire IA
+    this._generateOpponent();
+
     const stats = CareerManager.getPublicStats();
     document.getElementById('player-elo').textContent   = stats.elo;
-    document.getElementById('opponent-name').textContent = '—';
-    document.getElementById('opponent-elo').textContent  = '—';
+    document.getElementById('opponent-name').textContent = this._opponentName;
+    document.getElementById('opponent-elo').textContent  = this._opponentElo;
     document.getElementById('moves-list').innerHTML = '';
     document.getElementById('sf-feedback').textContent =
       'Active Stockfish pour analyser la position.';
@@ -338,7 +379,7 @@ const UIManager = {
     document.getElementById('flow-status').className   = 'flow-status';
 
     this.renderBoard();
-    this.showStatus('À Blancs de jouer.');
+    this.showStatus('À toi de jouer.');
   },
 
   // ── FONCTIONS PRIVÉES ────────────────────────────────────────
@@ -355,6 +396,7 @@ const UIManager = {
   /**
    * Applique un coup via ChessEngine.makeMove (synchrone).
    * L'évaluation Focus se fait en arrière-plan sans bloquer l'UI.
+   * Si c'est le tour de l'IA après ce coup, déclenche _triggerAIMove().
    */
   _applyMove(from, to, promo = 'q') {
     const move = ChessEngine.makeMove(from, to, promo);
@@ -367,24 +409,35 @@ const UIManager = {
 
     this.renderBoard();
     this.updateMoveHistory();
-    this._checkGameEnd();
+
+    if (this._checkGameEnd()) return;
+
+    // Tour de l'IA
+    if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) {
+      this._triggerAIMove();
+    } else {
+      this.showStatus('À toi de jouer.');
+    }
   },
 
+  /**
+   * Vérifie si la partie est terminée. Si oui, enregistre le résultat,
+   * met à jour le Focus et lance la revue post-partie.
+   * @returns {boolean} true si la partie est terminée
+   */
   _checkGameEnd() {
-    if (!ChessEngine.isGameOver()) {
-      const turn = ChessEngine.getTurn() === 'w' ? 'Blancs' : 'Noirs';
-      this.showStatus(`À ${turn} de jouer.`);
-      return;
-    }
+    if (!ChessEngine.isGameOver()) return false;
 
     const result      = ChessEngine.getGameResult();
     const playerColor = ChessEngine.getPlayerColor();
-    let msg = '';
-    let won = false;
+    let msg       = '';
+    let won       = false;
+    let resultKey = 'draw';
 
     if (result === 'checkmate') {
       const loserColor = ChessEngine.getTurn();
-      won = loserColor !== playerColor;
+      won       = loserColor !== playerColor;
+      resultKey = won ? 'win' : 'loss';
       const winner = loserColor === 'w' ? 'Noirs' : 'Blancs';
       msg = `Échec et mat — ${winner} gagnent !`;
     } else if (result === 'stalemate') {
@@ -395,6 +448,17 @@ const UIManager = {
 
     FocusSystem.onGameEnd(won);
     CareerManager.syncFocus();
+
+    // Enregistrer la partie dans le palmarès
+    if (this._opponentName) {
+      CareerManager.recordGame({
+        opponentName: this._opponentName,
+        opponentElo:  this._opponentElo,
+        result:       resultKey,
+        moves:        ChessEngine.getHistory().length,
+      });
+    }
+
     this.showStatus(msg);
 
     // Lancer la revue post-partie automatiquement
@@ -402,6 +466,8 @@ const UIManager = {
     if (history.length >= 4) {
       ReviewManager.startReview(history);
     }
+
+    return true;
   },
 
   // ── STOCKFISH VISUEL ─────────────────────────────────────────
@@ -416,25 +482,44 @@ const UIManager = {
     return { x: col * 72 + 36, y: row * 72 + 36 };
   },
 
-  /** Dessine ou efface la flèche N3 sur le SVG overlay. */
+  /** Dessine ou efface la flèche N3 (sprite pixel art) sur le plateau. */
   _renderArrow() {
-    const svg = document.getElementById('board-svg');
-    if (!svg) return;
-    // Nettoyer les lignes existantes
-    svg.querySelectorAll('line').forEach(l => l.remove());
+    // Nettoyer les flèches existantes
+    const old = document.getElementById('sf-arrow-img');
+    if (old) old.remove();
 
     if (!this.sfArrow) return;
+
+    const container = document.getElementById('board-container');
+    if (!container) return;
 
     const from = this._squareToXY(this.sfArrow.from);
     const to   = this._squareToXY(this.sfArrow.to);
 
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', from.x);
-    line.setAttribute('y1', from.y);
-    line.setAttribute('x2', to.x);
-    line.setAttribute('y2', to.y);
-    line.setAttribute('marker-end', 'url(#arrowhead)');
-    svg.appendChild(line);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dist  = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI); // 0° = droite
+
+    // Centrer l'image au milieu du segment from→to
+    const cx = (from.x + to.x) / 2;
+    const cy = (from.y + to.y) / 2;
+
+    const img = document.createElement('img');
+    img.id          = 'sf-arrow-img';
+    img.src         = 'assets/ui/arrow-best-move.png';
+    img.draggable   = false;
+    img.className   = 'sf-arrow-sprite';
+
+    // Étirer la largeur sur toute la distance, hauteur fixe 40px
+    const h = 40;
+    img.style.width    = dist + 'px';
+    img.style.height   = h + 'px';
+    img.style.left     = (cx - dist / 2) + 'px';
+    img.style.top      = (cy - h / 2) + 'px';
+    img.style.transform = `rotate(${angle}deg)`;
+
+    container.appendChild(img);
   },
 
   /**
@@ -514,6 +599,118 @@ const UIManager = {
     this.sfArrow        = null;
   },
 
+  // ── MAIA UI (barre de progression dashboard) ────────────────
+
+  _updateMaiaUI(status, progress) {
+    const btn  = document.getElementById('dash-btn-play');
+    const wrap = document.getElementById('maia-loading-bar');
+    const bar  = document.getElementById('maia-loading-progress');
+    const text = document.getElementById('maia-loading-text');
+    if (!btn) return;
+
+    if (status === 'ready') {
+      btn.disabled = false;
+      btn.textContent = '♟ Jouer une partie';
+      if (wrap) wrap.classList.add('hidden');
+    } else if (status === 'downloading') {
+      btn.disabled = true;
+      btn.textContent = 'Chargement de l\'IA…';
+      if (wrap) wrap.classList.remove('hidden');
+      if (bar)  bar.value = progress;
+      if (text) text.textContent = `Chargement de l'IA… ${progress}%`;
+    } else if (status === 'loading') {
+      btn.disabled = true;
+      btn.textContent = 'Chargement de l\'IA…';
+      if (wrap) wrap.classList.remove('hidden');
+    } else if (status === 'error') {
+      btn.disabled = true;
+      btn.textContent = 'Erreur IA';
+      if (text) text.textContent = 'Erreur de chargement. Rechargez la page.';
+      if (wrap) wrap.classList.remove('hidden');
+      if (bar)  bar.classList.add('hidden');
+    }
+  },
+
+  // ── ADVERSAIRE IA ───────────────────────────────────────────
+
+  /**
+   * Génère un adversaire avec nom et Elo proches du joueur (±200).
+   */
+  _generateOpponent() {
+    const stats     = CareerManager.getPublicStats();
+    const playerElo = stats.elo;
+    const delta     = Math.floor(Math.random() * 401) - 200; // -200 à +200
+    this._opponentElo  = Math.max(400, playerElo + delta);
+    this._opponentName = this._OPPONENT_NAMES[
+      Math.floor(Math.random() * this._OPPONENT_NAMES.length)
+    ];
+  },
+
+  /**
+   * Déclenche le coup de l'IA après le coup du joueur.
+   * Désactive le plateau, attend un délai naturel, appelle Maia, joue le coup.
+   */
+  async _triggerAIMove() {
+    this._aiThinking = true;
+    this.showStatus('L\'adversaire réfléchit…');
+
+    // Délai naturel (400-1000 ms)
+    await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
+
+    // Vérifier que la partie est toujours en cours
+    if (ChessEngine.isGameOver() || ChessEngine.getTurn() === ChessEngine.getPlayerColor()) {
+      this._aiThinking = false;
+      return;
+    }
+
+    try {
+      const fen       = ChessEngine.getFEN();
+      const playerElo = CareerManager.getPublicStats().elo;
+
+      // Opening book : 5 premiers demi-coups → Lichess Explorer
+      let move = null;
+      const plyCount = ChessEngine.getHistory().length;
+      if (plyCount < 5) {
+        const bookMove = await MaiaEngine.getOpeningMove(fen);
+        if (bookMove) move = bookMove;
+      }
+      // Fallback : Maia
+      if (!move) {
+        const result = await MaiaEngine.getMove(fen, this._opponentElo, playerElo);
+        move = result.move;
+      }
+
+      // Vérifier que la position n'a pas changé pendant l'inférence
+      if (ChessEngine.isGameOver() || ChessEngine.getFEN() !== fen) {
+        this._aiThinking = false;
+        return;
+      }
+
+      const from  = move.substring(0, 2);
+      const to    = move.substring(2, 4);
+      const promo = move.length > 4 ? move[4] : 'q';
+
+      const result = ChessEngine.makeMove(from, to, promo);
+      if (!result) {
+        console.error('[AI] Coup illégal de Maia:', move);
+        this._aiThinking = false;
+        return;
+      }
+
+      this.lastMove = { from, to };
+      this.renderBoard();
+      this.updateMoveHistory();
+      this._aiThinking = false;
+
+      if (this._checkGameEnd()) return;
+      this.showStatus('À toi de jouer.');
+    } catch (e) {
+      console.error('[AI] Erreur:', e);
+      this._aiThinking = false;
+      this.showStatus('Erreur IA — relance une partie.');
+    }
+  },
+
   _findKing(color) {
     const board = ChessEngine.getBoard();
     for (const row of board) {
@@ -543,8 +740,9 @@ const UIManager = {
       this.showScreen('dashboard');
     };
 
-    // Dashboard
+    // Dashboard — lancer une partie (bouton grisé tant que Maia n'est pas prêt)
     document.getElementById('dash-btn-play').onclick = () => {
+      if (!MaiaEngine.isReady()) return;
       this.showScreen('game');
       this.newGame();
     };
@@ -615,6 +813,7 @@ const UIManager = {
       CareerManager.syncFocus();
       this.showScreen('dashboard');
     };
+
   },
 
 };
@@ -622,6 +821,50 @@ const UIManager = {
 // ── LANCEMENT ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   ChessEngine.init();
+  MaiaEngine.setStatusCallback((status, progress) => {
+    UIManager._updateMaiaUI(status, progress);
+  });
+  MaiaEngine.init();   // async — tourne en arrière-plan
   CareerManager.init();
   UIManager.init();
+
+  // ── Musique de fond (ON par défaut) ──
+  const bgMusic = document.getElementById('bg-music');
+  const btnMusic = document.getElementById('btn-music');
+  if (bgMusic && btnMusic) {
+    bgMusic.volume = 0.15;
+    let musicWanted = true;   // l'utilisateur veut la musique
+
+    // Les navigateurs bloquent autoplay avant toute interaction.
+    // On tente play() immédiatement ; si ça échoue, on relance au
+    // premier clic n'importe où sur la page.
+    function startMusic() {
+      if (!musicWanted) return;
+      bgMusic.play().then(() => {
+        btnMusic.textContent = '♫ ON';
+        btnMusic.classList.add('music-on');
+      }).catch(() => {});
+    }
+    startMusic();
+    document.addEventListener('click', function autoStart() {
+      startMusic();
+      document.removeEventListener('click', autoStart);
+    }, { once: true });
+
+    btnMusic.addEventListener('click', (e) => {
+      e.stopPropagation();           // ne pas re-trigger autoStart
+      if (!bgMusic.paused) {
+        bgMusic.pause();
+        musicWanted = false;
+        btnMusic.textContent = '♫ OFF';
+        btnMusic.classList.remove('music-on');
+      } else {
+        musicWanted = true;
+        bgMusic.play().then(() => {
+          btnMusic.textContent = '♫ ON';
+          btnMusic.classList.add('music-on');
+        }).catch(() => {});
+      }
+    });
+  }
 });

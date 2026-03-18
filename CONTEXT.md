@@ -52,10 +52,14 @@ Phase 8 — Formats Bullet/Blitz/Rapid/Classique, polish, PWA, déploiement
 Où j'en suis actuellement
 Phase 1 terminée : échiquier fonctionnel (roque, promotion, échec, historique).
 Phase 2 terminée : personnage créé, persistance localStorage, formule Elo FIDE, dashboard.
-Phase 3a terminée : Stockfish en Web Worker, évaluation centipawns, jauge Focus 
-avec 5 zones visuelles, 3 niveaux d'analyse (évaluateur, guide pièce, flèche),
-calcul anticipé du meilleur coup, flag usedStockfishThisTurn opérationnel.
-Je commence maintenant la Phase 3b.
+Phase 3a terminée : Stockfish Web Worker, centipawns, jauge Focus 5 zones,
+3 niveaux d'analyse (évaluateur, guide pièce, flèche), calcul anticipé,
+flag usedStockfishThisTurn opérationnel.
+Phase 3b terminée : Flow State avec bonus passifs progressifs (seuil 50cp, 
+levels 1-4), malus multiplicatif 10% par activation, segment doré à 130%,
+effet Confiance caché, persistance Focus inter-parties, tremblement zone noire,
+revue post-partie avec graphique style Chess.com et flèches rouge/verte.
+Je commence maintenant la Phase 4 : intégration Maia Chess.
 
 Comment tu dois travailler avec moi
 Ce que j'attends de toi :

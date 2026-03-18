@@ -543,19 +543,18 @@ const FocusSystem = {
       }
     });
 
-    // ── Tremblement continu zone noire (0-5%) sur le conteneur ──
-    const boardContainer = document.getElementById('board-container');
-    if (boardContainer) {
-      boardContainer.classList.toggle('focus-zone-black', zone.min === 0 && zone.max === 5);
+    // ── Tremblement continu zone noire (0-5%) sur la barre de focus ──
+    const focusBarWrap = document.getElementById('focus-bar-wrap');
+    if (focusBarWrap) {
+      focusBarWrap.classList.toggle('focus-zone-black', zone.min === 0 && zone.max === 5);
     }
 
-    // ── Tremblement ponctuel de l'échiquier (une seule fois par partie, 3s) ──
-    const boardEl = document.getElementById('board');
-    if (boardEl && zone.min === 0 && zone.max === 5 && !this.shakeTriggered) {
+    // ── Tremblement ponctuel de la barre de focus (une seule fois par partie) ──
+    if (focusBarWrap && zone.min === 0 && zone.max === 5 && !this.shakeTriggered) {
       this.shakeTriggered = true;
-      boardEl.classList.remove('focus-exhausted');
-      void boardEl.offsetWidth;
-      boardEl.classList.add('focus-exhausted');
+      focusBarWrap.classList.remove('focus-exhausted');
+      void focusBarWrap.offsetWidth;
+      focusBarWrap.classList.add('focus-exhausted');
     }
   },
 

@@ -18,10 +18,20 @@
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/daisyui.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
+  <!-- Police pixel art -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/ui.css">
 </head>
 <body>
+
+  <!-- Musique de fond -->
+  <audio id="bg-music" loop preload="auto"
+         src="assets/Sounds/Music/cfl_turningpages-subtle-pixel-glow-462740.mp3"></audio>
+  <button id="btn-music" class="music-toggle music-on" title="Musique ON/OFF">♫ ON</button>
 
   <!-- ══════════════════════════════════════════════════════════════
        ÉCRAN : DASHBOARD
@@ -81,9 +91,16 @@
 
       <!-- Actions -->
       <div class="dash-actions">
-        <button id="dash-btn-play" class="btn btn-primary btn-lg w-full">
+        <button id="dash-btn-play" class="btn btn-primary btn-lg w-full" disabled>
           ♟ Jouer une partie
         </button>
+        <div id="maia-loading-bar" class="hidden">
+          <progress id="maia-loading-progress" class="progress progress-info w-full h-2"
+                    value="0" max="100"></progress>
+          <p id="maia-loading-text" class="text-xs text-center opacity-50 mt-1">
+            Chargement de l'IA…
+          </p>
+        </div>
         <button id="dash-btn-delete" class="btn btn-ghost btn-xs text-error mt-2">
           Effacer la sauvegarde et recommencer
         </button>
@@ -156,14 +173,7 @@
         <div id="captured-black"></div>
         <div id="board-container">
           <div id="board"></div>
-          <svg id="board-svg" viewBox="0 0 576 576" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <marker id="arrowhead" markerWidth="10" markerHeight="7"
-                      refX="8" refY="3.5" orient="auto" fill="#3b82f6">
-                <polygon points="0 0, 10 3.5, 0 7" />
-              </marker>
-            </defs>
-          </svg>
+          <!-- La flèche N3 est maintenant un sprite IMG positionné par JS -->
         </div>
         <div id="captured-white"></div>
       </div>
@@ -182,13 +192,13 @@
        Affiché automatiquement au premier lancement.
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="modal-create-player" class="modal">
-    <div class="modal-box w-full max-w-md">
-      <h2 class="text-xl font-bold mb-1">Crée ton personnage</h2>
-      <p class="text-sm opacity-60 mb-5">Tu ne pourras pas changer ces informations plus tard.</p>
+    <div class="modal-box w-full max-w-md" style="color:#e0d8c8;">
+      <h2 style="font-family:'Press Start 2P',monospace;font-size:14px;color:#e8c98a;margin-bottom:4px;">Crée ton personnage</h2>
+      <p style="font-family:'Press Start 2P',monospace;font-size:7px;opacity:0.6;margin-bottom:20px;">Tu ne pourras pas changer ces infos plus tard.</p>
 
       <div class="form-control mb-4">
         <label class="label">
-          <span class="label-text">Ton prénom</span>
+          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Ton prénom</span>
         </label>
         <input type="text" id="input-nom"
                class="input input-bordered w-full"
@@ -198,17 +208,67 @@
 
       <div class="form-control mb-4">
         <label class="label">
-          <span class="label-text">Nationalité</span>
+          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Nationalité</span>
         </label>
-        <input type="text" id="input-nationalite"
-               class="input input-bordered w-full"
-               placeholder="France, Russie, Inde…"
-               maxlength="30" autocomplete="off" />
+        <select id="input-nationalite" class="select select-bordered w-full">
+          <option value="" disabled selected>Choisis ton pays…</option>
+          <option value="Afrique du Sud">🇿🇦 Afrique du Sud</option>
+          <option value="Allemagne">🇩🇪 Allemagne</option>
+          <option value="Angleterre">🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre</option>
+          <option value="Argentine">🇦🇷 Argentine</option>
+          <option value="Arménie">🇦🇲 Arménie</option>
+          <option value="Australie">🇦🇺 Australie</option>
+          <option value="Azerbaïdjan">🇦🇿 Azerbaïdjan</option>
+          <option value="Belgique">🇧🇪 Belgique</option>
+          <option value="Biélorussie">🇧🇾 Biélorussie</option>
+          <option value="Brésil">🇧🇷 Brésil</option>
+          <option value="Bulgarie">🇧🇬 Bulgarie</option>
+          <option value="Canada">🇨🇦 Canada</option>
+          <option value="Chine">🇨🇳 Chine</option>
+          <option value="Corée du Sud">🇰🇷 Corée du Sud</option>
+          <option value="Croatie">🇭🇷 Croatie</option>
+          <option value="Cuba">🇨🇺 Cuba</option>
+          <option value="Danemark">🇩🇰 Danemark</option>
+          <option value="Égypte">🇪🇬 Égypte</option>
+          <option value="Espagne">🇪🇸 Espagne</option>
+          <option value="États-Unis">🇺🇸 États-Unis</option>
+          <option value="France">🇫🇷 France</option>
+          <option value="Géorgie">🇬🇪 Géorgie</option>
+          <option value="Grèce">🇬🇷 Grèce</option>
+          <option value="Hongrie">🇭🇺 Hongrie</option>
+          <option value="Inde">🇮🇳 Inde</option>
+          <option value="Indonésie">🇮🇩 Indonésie</option>
+          <option value="Iran">🇮🇷 Iran</option>
+          <option value="Israël">🇮🇱 Israël</option>
+          <option value="Italie">🇮🇹 Italie</option>
+          <option value="Japon">🇯🇵 Japon</option>
+          <option value="Kazakhstan">🇰🇿 Kazakhstan</option>
+          <option value="Maroc">🇲🇦 Maroc</option>
+          <option value="Mexique">🇲🇽 Mexique</option>
+          <option value="Norvège">🇳🇴 Norvège</option>
+          <option value="Ouzbékistan">🇺🇿 Ouzbékistan</option>
+          <option value="Pays-Bas">🇳🇱 Pays-Bas</option>
+          <option value="Pérou">🇵🇪 Pérou</option>
+          <option value="Philippines">🇵🇭 Philippines</option>
+          <option value="Pologne">🇵🇱 Pologne</option>
+          <option value="Portugal">🇵🇹 Portugal</option>
+          <option value="République tchèque">🇨🇿 République tchèque</option>
+          <option value="Roumanie">🇷🇴 Roumanie</option>
+          <option value="Russie">🇷🇺 Russie</option>
+          <option value="Serbie">🇷🇸 Serbie</option>
+          <option value="Suède">🇸🇪 Suède</option>
+          <option value="Suisse">🇨🇭 Suisse</option>
+          <option value="Tunisie">🇹🇳 Tunisie</option>
+          <option value="Turquie">🇹🇷 Turquie</option>
+          <option value="Ukraine">🇺🇦 Ukraine</option>
+          <option value="Venezuela">🇻🇪 Venezuela</option>
+          <option value="Vietnam">🇻🇳 Vietnam</option>
+        </select>
       </div>
 
       <div class="form-control mb-6">
         <label class="label">
-          <span class="label-text">Style de jeu</span>
+          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Style de jeu</span>
         </label>
         <select id="input-style" class="select select-bordered w-full">
           <option value="Positionnel">Positionnel — solidité et structure</option>
@@ -218,7 +278,8 @@
       </div>
 
       <div class="modal-action">
-        <button id="btn-create-player" class="btn btn-primary w-full">
+        <button id="btn-create-player" class="btn btn-primary w-full"
+                style="font-family:'Press Start 2P',monospace;font-size:10px;border-radius:0;box-shadow:3px 3px 0 rgba(0,0,0,0.4);">
           Commencer la carrière →
         </button>
       </div>
@@ -230,7 +291,7 @@
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="promotion-modal" class="modal">
     <div class="modal-box bg-base-200 border border-primary/30 text-center">
-      <h3 class="text-lg font-bold mb-4">Promotion — choisissez la pièce</h3>
+      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;">Promotion — choisissez la pièce</h3>
       <div id="promotion-choices" class="flex gap-4 justify-center"></div>
     </div>
   </dialog>
@@ -240,7 +301,7 @@
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="modal-review" class="modal">
     <div class="modal-box w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-base-200">
-      <h2 class="text-xl font-bold mb-4">Revue post-partie</h2>
+      <h2 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:13px;">Revue post-partie</h2>
 
       <!-- Barre de progression pendant l'analyse -->
       <div id="review-progress-wrap">
@@ -254,7 +315,7 @@
       <!-- Résultats (masqués pendant l'analyse) -->
       <div id="review-results" class="hidden">
         <div id="review-chart" class="mb-6 max-h-64 overflow-y-auto"></div>
-        <h3 class="text-lg font-bold mb-3">Moments clés</h3>
+        <h3 class="font-bold mb-3" style="font-family:'Press Start 2P',monospace;font-size:10px;">Moments clés</h3>
         <div id="review-moments" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4"></div>
       </div>
 
@@ -266,10 +327,12 @@
 
   <!-- ── SCRIPTS (ordre de dépendance) ── -->
   <script src="lib/chess.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
   <script src="js/save-manager.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
   <script src="js/chess-engine.js"></script>
+  <script src="js/maia-engine.js"></script>
   <script src="js/review-manager.js"></script>
   <script src="js/ui-manager.js"></script>
 
