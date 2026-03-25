@@ -59,7 +59,7 @@ Phase 3b terminée : Flow State avec bonus passifs progressifs (seuil 50cp,
 levels 1-4), malus multiplicatif 10% par activation, segment doré à 130%,
 effet Confiance caché, persistance Focus inter-parties, tremblement zone noire,
 revue post-partie avec graphique style Chess.com et flèches rouge/verte.
-Je commence maintenant la Phase 4 : intégration Maia Chess.
+J'ai bien avancé la pahse 4, on y travaille. Il faut équilibrer le tout.
 
 Comment tu dois travailler avec moi
 Ce que j'attends de toi :

@@ -43,6 +43,40 @@ const ChessEngine = (() => {
     if (msg === 'readyok') { _ready = true; return; }
     if (!_evalResolve) return;
 
+    // ── Mode multiPV ──
+    if (_evalResolve._multiPV) {
+      if (msg.includes('score') && msg.includes(' pv ')) {
+        const pvMatch   = msg.match(/multipv (\d+)/);
+        const cpMatch   = msg.match(/score cp (-?\d+)/);
+        const mateMatch = msg.match(/score mate (-?\d+)/);
+        const moveMatch = msg.match(/ pv (\S+)/);
+
+        if (moveMatch) {
+          const pvNum = pvMatch ? parseInt(pvMatch[1]) : 1;
+          const cp    = cpMatch  ? parseInt(cpMatch[1])
+                      : mateMatch ? (parseInt(mateMatch[1]) > 0 ? 10000 : -10000)
+                      : 0;
+          const move = moveMatch[1];
+
+          // Garder la dernière profondeur pour chaque PV
+          const existing = _evalResolve._pvLines.findIndex(p => p.pvNum === pvNum);
+          if (existing >= 0) _evalResolve._pvLines[existing] = { pvNum, move, cp };
+          else               _evalResolve._pvLines.push({ pvNum, move, cp });
+        }
+      }
+      if (msg.startsWith('bestmove')) {
+        const result = _evalResolve._pvLines
+          .sort((a, b) => a.pvNum - b.pvNum)
+          .map(p => ({ move: p.move, cp: p.cp }));
+        const resolve = _evalResolve;
+        _evalResolve = null;
+        _worker.postMessage('setoption name MultiPV value 1');
+        resolve(result);
+      }
+      return;
+    }
+
+    // ── Mode single PV (existant) ──
     if (msg.includes('score cp')) {
       const m = msg.match(/score cp (-?\d+)/);
       if (m) _evalResolve._lastCp = parseInt(m[1], 10);
@@ -59,6 +93,35 @@ const ChessEngine = (() => {
       _evalResolve  = null;
       resolve(cp);
     }
+  }
+
+  /**
+   * Évalue une position en mode multiPV.
+   * @param {string} fen
+   * @param {number} depth
+   * @param {number} numPV — nombre de variantes
+   * @returns {Promise<Array<{move: string, cp: number}>>}
+   */
+  function _evaluateMultiPV(fen, depth, numPV) {
+    return new Promise((resolve) => {
+      if (!_worker || !_ready) { resolve([]); return; }
+
+      if (_evalResolve) {
+        _worker.postMessage('stop');
+        const prev = _evalResolve;
+        _evalResolve = null;
+        if (prev._multiPV) prev([]);
+        else                prev(0);
+      }
+
+      resolve._multiPV = true;
+      resolve._pvLines = [];
+      _evalResolve = resolve;
+
+      _worker.postMessage('setoption name MultiPV value ' + numPV);
+      _worker.postMessage('position fen ' + fen);
+      _worker.postMessage('go depth ' + depth);
+    });
   }
 
   function _evaluate(fen, depth) {
@@ -110,32 +173,38 @@ const ChessEngine = (() => {
   // ── ÉVALUATION FOCUS EN ARRIÈRE-PLAN ────────────────────────
 
   /**
-   * Fire-and-forget : récupère cpBefore du prefetch, calcule cpAfter,
+   * Fire-and-forget : évalue cpBefore et cpAfter de manière fiable,
    * puis appelle FocusSystem.evaluateMoveDelta().
    * Le joueur n'attend jamais cette fonction.
+   *
+   * @param {string} fenBefore — FEN AVANT le coup du joueur (pour cpBefore)
+   * @param {string} fenAfter  — FEN APRÈS le coup du joueur (pour cpAfter)
    */
-  async function _runFocusEval(fenAfter, sfUsedFlag, capturedPiece) {
+  async function _runFocusEval(fenBefore, fenAfter, sfUsedFlag, capturedPiece, plyIndex) {
     _bgEvalRunning = true;
 
-    // Récupérer cpBefore depuis le prefetch (peut encore être en cours)
+    // cpBefore : utiliser le prefetch s'il correspond, sinon évaluer maintenant
     let cpBefore = 0;
-    if (_prefetchPromise) {
+    if (_prefetchPromise && _prefetchFen === fenBefore) {
       cpBefore = await _prefetchPromise;
+    } else {
+      // Pas de prefetch valide → évaluer la position avant le coup
+      cpBefore = await _evaluate(fenBefore, FOCUS_DEPTH);
     }
     _prefetchPromise = null;
     _prefetchFen     = null;
 
-    // Calculer cpAfter
+    // Calculer cpAfter (du point de vue de l'adversaire)
     const cpAfter = await _evaluate(fenAfter, FOCUS_DEPTH);
 
     const deltaCp = cpBefore + cpAfter;
     console.log(`[Engine] cpBefore=${cpBefore}  cpAfter=${cpAfter}(adv)  delta=${deltaCp}`);
 
-    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null);
+    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null, plyIndex);
 
     _bgEvalRunning = false;
 
-    // Bug 3 : lancer le calcul anticipé du meilleur coup pour le N3
+    // Lancer le calcul anticipé du meilleur coup pour le N3
     _launchBestMovePrefetch();
   }
 
@@ -146,6 +215,9 @@ const ChessEngine = (() => {
    * Ne se lance que si aucune autre évaluation n'est en cours.
    */
   function _launchBestMovePrefetch() {
+    // Ne pas interrompre une évaluation Focus en cours
+    if (_bgEvalRunning) return;
+
     const fen = _game.fen();
     // Déjà en cache ou en cours pour cette position
     if (_cachedBestMoveFen === fen && (_cachedBestMove || _bestMovePromise)) return;
@@ -234,6 +306,8 @@ const ChessEngine = (() => {
       const colorBefore = _game.turn();
       // Bug 2 fix : capturer le flag AVANT de le remettre à false
       const sfFlag = _usedStockfishThisTurn;
+      const fenBefore = _game.fen(); // Capturer AVANT le coup pour cpBefore fiable
+
       const move = _game.move({ from, to, promotion: promo });
       if (!move) return null;
 
@@ -246,12 +320,15 @@ const ChessEngine = (() => {
       _usedStockfishThisTurn = false;
 
       // Évaluer le Focus uniquement pour les coups du joueur humain
-      if (colorBefore === _playerColor) {
-        _runFocusEval(_game.fen(), sfFlag, move.captured || null);
-      } else {
-        // Coup adverse — lancer le prefetch du meilleur coup directement
-        _launchBestMovePrefetch();
+      // Ne pas évaluer si le coup met fin à la partie (mat/pat) —
+      // Stockfish retourne des scores de mat extrêmes qui faussent le delta.
+      if (colorBefore === _playerColor && !_game.game_over()) {
+        const plyIndex = _game.history().length;
+        _runFocusEval(fenBefore, _game.fen(), sfFlag, move.captured || null, plyIndex);
       }
+      // Note : pas de _launchBestMovePrefetch ici pour les coups IA.
+      // Le prefetch sera lancé à la fin de _runFocusEval pour éviter
+      // d'annuler l'évaluation Focus en cours sur le worker unique.
 
       return move;
     },
@@ -325,6 +402,96 @@ const ChessEngine = (() => {
       return _evaluateWithMove(fen, MANUAL_DEPTH);
     },
 
+    // ── MULTIPV (FLOW II/III : surbrillance de pièces) ────────────
+
+    /**
+     * Retourne les N meilleurs coups pour la position courante.
+     * Utilisé par le Flow State pour la surbrillance de pièces.
+     * @param {number} numPV — nombre de variantes (ex: 6)
+     * @returns {Promise<Array<{move: string, cp: number}>>}
+     */
+    getMultiPV(numPV) {
+      return _evaluateMultiPV(_game.fen(), MANUAL_DEPTH, numPV);
+    },
+
+    // ── DÉTECTION DE MENACES (FLOW I) ──────────────────────────────
+
+    /**
+     * Retourne la liste des pièces du joueur attaquées par l'ennemi.
+     * Utilise un FEN inversé pour simuler le tour de l'adversaire.
+     * @returns {Array<{from: string, to: string, piece: string}>}
+     */
+    getThreats() {
+      const fen   = _game.fen();
+      const parts = fen.split(' ');
+
+      // Inverser le trait pour donner la main à l'adversaire
+      if (_game.turn() === _playerColor) {
+        parts[1] = _playerColor === 'w' ? 'b' : 'w';
+        parts[3] = '-'; // reset en passant pour éviter les positions illégales
+      }
+
+      let temp;
+      try {
+        temp = new Chess(parts.join(' '));
+      } catch (e) { return []; }
+      if (!temp) return [];
+
+      // Tous les coups légaux de l'adversaire qui capturent une pièce du joueur
+      // Plusieurs pièces peuvent attaquer la même case → on garde chaque flèche
+      const moves   = temp.moves({ verbose: true });
+      const threats = [];
+      const seen    = new Set();
+
+      for (const m of moves) {
+        const key = m.from + m.to;
+        if (m.captured && !seen.has(key)) {
+          seen.add(key);
+          threats.push({ from: m.from, to: m.to, piece: m.captured });
+        }
+      }
+
+      // Trier par valeur de pièce menacée (les plus précieuses d'abord), max 5
+      const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 99 };
+      threats.sort((a, b) => (VAL[b.piece] || 0) - (VAL[a.piece] || 0));
+      return threats.slice(0, 5);
+    },
+
+    // ── REPRISE DE COUP (TAKEBACK) ────────────────────────────────
+
+    /**
+     * Annule le dernier coup du joueur (et la réponse IA s'il y en a une).
+     * Remet la position au moment où c'était le tour du joueur.
+     * @returns {boolean} true si la reprise a fonctionné
+     */
+    takeback() {
+      if (_game.history().length === 0) return false;
+
+      // Si c'est le tour du joueur → l'IA a déjà joué → undo 2 coups
+      // Si c'est le tour de l'IA → le joueur vient de jouer → undo 1 coup
+      if (_game.turn() === _playerColor) {
+        // Tour du joueur : undo réponse IA + coup joueur
+        const m1 = _game.undo(); // undo IA
+        if (!m1) return false;
+        const m2 = _game.undo(); // undo joueur
+        if (!m2) { _game.move(m1); return false; } // rollback si échec
+      } else {
+        // Tour de l'IA (coup joueur en attente d'éval) : undo 1 coup joueur
+        const m = _game.undo();
+        if (!m) return false;
+      }
+
+      // Invalider tous les caches
+      _cachedBestMove        = null;
+      _cachedBestMoveFen     = null;
+      _bestMovePromise       = null;
+      _prefetchPromise       = null;
+      _prefetchFen           = null;
+      _usedStockfishThisTurn = false;
+
+      return true;
+    },
+
     // ── FONCTIONS DE LECTURE ──────────────────────────────────────
 
     getLegalMoves(square) {
@@ -348,6 +515,64 @@ const ChessEngine = (() => {
 
     getPiece(square) { return _game.get(square); },
     getBoard()       { return _game.board(); },
+
+    /**
+     * Retourne une promesse qui se résout quand l'évaluation Focus
+     * en arrière-plan est terminée. Permet de séquencer les accès
+     * au worker Stockfish unique.
+     */
+    waitForBgEval() {
+      if (!_bgEvalRunning) return Promise.resolve();
+      return new Promise(resolve => {
+        const check = () => {
+          if (!_bgEvalRunning) resolve();
+          else setTimeout(check, 50);
+        };
+        check();
+      });
+    },
+
+    /**
+     * Retourne les pièces capturées par chaque camp.
+     * Compare la position actuelle aux 16 pièces de départ.
+     * @returns {{ byWhite: string[], byBlack: string[], diff: number }}
+     *   byWhite = pièces noires capturées par les blancs (triées par valeur)
+     *   byBlack = pièces blanches capturées par les noirs
+     *   diff = avantage matériel des blancs en points (positif = blancs devant)
+     */
+    getCapturedPieces() {
+      const START = { w: { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 },
+                      b: { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 } };
+      const VAL   = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+      const ORDER = ['q', 'r', 'b', 'n', 'p'];
+
+      // Compter les pièces restantes sur l'échiquier
+      const remaining = { w: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 },
+                          b: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 } };
+      const board = _game.board();
+      for (const row of board) {
+        for (const cell of row) {
+          if (cell) remaining[cell.color][cell.type]++;
+        }
+      }
+
+      // Pièces capturées = départ − restantes
+      const byWhite = []; // pièces noires prises
+      const byBlack = []; // pièces blanches prises
+      let whiteMat = 0, blackMat = 0;
+
+      for (const t of ORDER) {
+        const takenBlack = START.b[t] - remaining.b[t];
+        for (let i = 0; i < takenBlack; i++) byWhite.push('b' + t.toUpperCase());
+        whiteMat += (remaining.w[t] || 0) * (VAL[t] || 0);
+
+        const takenWhite = START.w[t] - remaining.w[t];
+        for (let i = 0; i < takenWhite; i++) byBlack.push('w' + t.toUpperCase());
+        blackMat += (remaining.b[t] || 0) * (VAL[t] || 0);
+      }
+
+      return { byWhite, byBlack, diff: whiteMat - blackMat };
+    },
 
   };
 })();

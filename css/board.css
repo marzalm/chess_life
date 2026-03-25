@@ -221,14 +221,87 @@ body {
 .sf-eval-badge.eval-blunder    { background: #991b1b; color: #fff; }
 .sf-eval-badge.eval-loading    { background: #555; color: #ccc; }
 
+/* ── FLOW HIGHLIGHT : surbrillance pièces Flow II/III ── */
+
+.square.flow-highlight {
+  box-shadow: inset 0 0 0 4px #fbbf24;
+  background: rgba(251, 191, 36, 0.20) !important;
+  animation: flow-glow 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes flow-glow {
+  from { box-shadow: inset 0 0 0 4px #fbbf24; }
+  to   { box-shadow: inset 0 0 8px 4px rgba(251, 191, 36, 0.5); }
+}
+
+/* ── THREAT ARROWS : flèches rouges menaces Flow I+ ── */
+
+.threat-arrow-img {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  background: linear-gradient(90deg, transparent 0%, #e24b4a 10%, #e24b4a 85%, transparent 100%);
+  border-radius: 2px;
+  opacity: 0.65;
+  filter: drop-shadow(1px 1px 0px rgba(0,0,0,0.3));
+}
+
+/* ── TEXTE FLOTTANT : évaluation du coup sur l'échiquier ── */
+
+@keyframes float-eval {
+  0%   { opacity: 1;   transform: translate(-50%, 0); }
+  60%  { opacity: 1; }
+  100% { opacity: 0;   transform: translate(-50%, -40px); }
+}
+
+.floating-eval {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 20;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.3);
+  animation: float-eval 1.5s ease-out forwards;
+  white-space: nowrap;
+}
+
+.floating-eval.eval-best       { color: #fbbf24; font-size: 9px; }
+.floating-eval.eval-excellent   { color: #4ade80; }
+.floating-eval.eval-good        { color: #86efac; }
+.floating-eval.eval-neutral     { color: #8a7f99; }
+.floating-eval.eval-imprecis    { color: #f97316; }
+.floating-eval.eval-blunder     { color: #e24b4a; font-size: 9px; }
+
 /* ── ZONE NOIRE : tremblement déplacé sur la barre de focus (voir ui.css) ── */
 
 /* ── PIÈCES CAPTURÉES ── */
 
 #captured-white,
 #captured-black {
-  font-size: 22px;
-  min-height: 28px;
-  letter-spacing: -4px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-height: 24px;
   padding: 2px 4px;
+  flex-wrap: wrap;
+}
+
+.captured-piece-img {
+  width: 20px;
+  height: 20px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  opacity: 0.85;
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.3));
+  margin-right: -4px;
+}
+
+.captured-advantage {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: var(--px-text-dim, #8a7f99);
+  margin-left: 6px;
 }

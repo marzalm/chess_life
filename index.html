@@ -32,6 +32,7 @@
   <audio id="bg-music" loop preload="auto"
          src="assets/Sounds/Music/cfl_turningpages-subtle-pixel-glow-462740.mp3"></audio>
   <button id="btn-music" class="music-toggle music-on" title="Musique ON/OFF">♫ ON</button>
+  <button id="btn-sfx" class="music-toggle music-on" title="Sons ON/OFF">SFX ON</button>
 
   <!-- ══════════════════════════════════════════════════════════════
        ÉCRAN : DASHBOARD
@@ -150,16 +151,11 @@
         </div>
         <div id="stockfish-section">
           <div class="label">Analyse Stockfish</div>
-          <div class="tooltip w-full" id="tooltip-sf1" data-tip="">
-            <button class="sf-btn w-full" id="btn-sf1">N1 — Évaluateur de coup (-7%)</button>
-          </div>
-          <div class="tooltip w-full" id="tooltip-sf2" data-tip="">
-            <button class="sf-btn w-full" id="btn-sf2">N2 — Guide pièce (-14%)</button>
-          </div>
           <div class="tooltip w-full" id="tooltip-sf3" data-tip="">
             <button class="sf-btn w-full" id="btn-sf3">N3 — Meilleur coup (-22%)</button>
           </div>
           <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
+          <button class="sf-btn w-full" id="btn-takeback" style="margin-top:6px;">Reprise de coup (-30%)</button>
         </div>
         <div id="game-controls">
           <button id="btn-new-game">Nouvelle partie</button>
@@ -328,6 +324,7 @@
   <script src="lib/chess.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
   <script src="js/save-manager.js"></script>
+  <script src="js/sound-manager.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
   <script src="js/chess-engine.js"></script>

@@ -328,6 +328,20 @@
   color: #b58863;
 }
 
+/* ── ANNOTATIONS ÉVALUATION DANS L'HISTORIQUE ── */
+
+.move-eval {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  margin-left: 2px;
+  font-weight: bold;
+}
+
+.move-eval.eval-best       { color: #fbbf24; }
+.move-eval.eval-excellent   { color: #4ade80; }
+.move-eval.eval-imprecis    { color: #f97316; }
+.move-eval.eval-blunder     { color: #e24b4a; }
+
 /* ── PROMOTION ── */
 
 .promo-piece {
@@ -897,4 +911,26 @@
 
 .music-toggle.music-on {
   animation: music-pulse 2s steps(3) infinite;
+}
+
+/* SFX toggle positionné à gauche du bouton musique */
+#btn-sfx {
+  right: auto;
+  left: 16px;
+}
+
+/* Bouton Reprise de coup — style distinct (rouge/warning) */
+#btn-takeback {
+  background: #4a1a2e;
+  border-color: #8b3a5a;
+  color: #e8a0b8;
+}
+#btn-takeback:hover:not(:disabled) {
+  background: #5a2a3e;
+  border-color: #a04a6a;
+  color: #f0c0d0;
+}
+#btn-takeback:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

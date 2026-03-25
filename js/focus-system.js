@@ -41,6 +41,10 @@ const FocusSystem = {
 
   shakeTriggered: false,
 
+  // ── CLASSIFICATION DU DERNIER COUP ──────────────────────────
+  lastMoveEval:      null,   // { key, label, cls, ply }
+  _moveEvalCallback: null,   // fonction appelée par l'UI après chaque évaluation
+
   // ── ZONES ────────────────────────────────────────────────────
 
   ZONES: [
@@ -61,6 +65,9 @@ const FocusSystem = {
 
   SF_COSTS:         { 1: 7, 2: 14, 3: 22 },
   SF_MAX_PENALTIES: { 1: 0.03, 2: 0.05, 3: 0.08 },
+
+  TAKEBACK_COST:        30,   // coût Focus de la reprise de coup
+  TAKEBACK_MAX_PENALTY: 0.08, // pénalité au max (même qu'un N3)
 
   /**
    * Retourne le coût effectif Stockfish après application des modificateurs.
@@ -182,6 +189,25 @@ const FocusSystem = {
     return -Math.round(Math.min(35, 5 + abs / 20));
   },
 
+  // ── CALLBACK ÉVALUATION ──────────────────────────────────────
+
+  setMoveEvalCallback(fn) { this._moveEvalCallback = fn; },
+  getLastMoveEval()       { return this.lastMoveEval; },
+
+  /**
+   * Classifie un coup selon son delta cp (indépendamment de sfUsed).
+   * @returns {{ key: string, label: string, cls: string }}
+   */
+  _classifyMove(abs, threshold) {
+    // abs <= 12 : "Meilleur" — tolérance pour la variance Stockfish entre prefetch et post-eval
+    if (abs <= 12)                   return { key: 'best',        label: 'Meilleur !',  cls: 'eval-best' };
+    if (abs <= threshold * 0.5)      return { key: 'excellent',   label: 'Excellent !',  cls: 'eval-excellent' };
+    if (abs < threshold)             return { key: 'good',        label: 'Bon',          cls: 'eval-good' };
+    if (abs < 100)                   return { key: 'neutral',     label: 'Neutre',       cls: 'eval-neutral' };
+    if (abs < 200)                   return { key: 'imprecision', label: 'Imprécis',     cls: 'eval-imprecis' };
+    return                                    { key: 'blunder',    label: 'Erreur !',     cls: 'eval-blunder' };
+  },
+
   // ── MODIFICATEURS ──────────────────────────────────────────
 
   addModifier(mod) {
@@ -252,10 +278,16 @@ const FocusSystem = {
    * @param {number}  deltaCp       - perte en centipawns (0 = parfait)
    * @param {boolean} sfUsed        - true si Stockfish a été utilisé ce tour
    * @param {string|null} captured  - type de pièce capturée ('p','n','b','r','q') ou null
+   * @param {number}  [plyIndex=0]  - numéro du demi-coup (pour traçabilité UI)
    */
-  evaluateMoveDelta(deltaCp, sfUsed, captured) {
+  evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex) {
     const abs = Math.abs(deltaCp);
     const threshold = this._getGoodMoveThreshold();
+
+    // Classification du coup (pour l'UI : historique + texte flottant)
+    const evalInfo = this._classifyMove(abs, threshold);
+    evalInfo.ply = plyIndex || 0;
+    this.lastMoveEval = evalInfo;
 
     // 1. Capture micro-regen (indépendant de la qualité du coup)
     if (captured && this.CAPTURE_FOCUS[captured]) {
@@ -265,27 +297,41 @@ const FocusSystem = {
     // 2. Évaluation de la qualité du coup
     if (abs < threshold && !sfUsed) {
       // ── Bon ou meilleur coup ──
-      const gain = this._getMomentumGain(abs === 0);
-      this.apply(+gain, abs === 0 ? 'Meilleur coup' : 'Bon coup');
+      const isBest = abs <= 12;
+      const gain   = this._getMomentumGain(isBest);
+      this.apply(+gain, isBest ? 'Meilleur coup' : 'Bon coup');
 
       // Incrémenter le compteur et recalculer le palier Flow
       this.consecutiveGoodMoves++;
       this._updateFlowFromCounter();
 
+      // Son
+      if (typeof SoundManager !== 'undefined') {
+        if (isBest) SoundManager.playBestMove(this.consecutiveGoodMoves);
+        else        SoundManager.playGoodMove(this.consecutiveGoodMoves);
+      }
+
     } else if (abs >= 100) {
       // ── Mauvais coup (imprécision ou blunder) ──
       const penalty = this._getGraduatedPenalty(abs);
-      this.apply(penalty, abs >= 200 ? 'Blunder' : 'Imprécision');
+      const isBlunder = abs >= 200;
+      this.apply(penalty, isBlunder ? 'Blunder' : 'Imprécision');
 
       // Dégradation du Flow
       if (this.flowPalier > 0) {
-        if (abs >= 200) {
+        if (isBlunder) {
           this._exitFlow();
         } else {
           this._dropFlowPalier();
         }
       }
       this.consecutiveGoodMoves = 0;
+
+      // Son
+      if (typeof SoundManager !== 'undefined') {
+        if (isBlunder) SoundManager.playBlunder();
+        else           SoundManager.playImprecision();
+      }
 
     } else {
       // ── Neutre (threshold ≤ abs < 100) ──
@@ -295,7 +341,15 @@ const FocusSystem = {
       }
     }
 
+    // 3. Son Focus à 0
+    if (this.current <= 0 && typeof SoundManager !== 'undefined') {
+      SoundManager.playFocusEmpty();
+    }
+
     this.render();
+
+    // 4. Callback UI (historique + texte flottant)
+    if (this._moveEvalCallback) this._moveEvalCallback(evalInfo);
   },
 
   // ── FLOW STATE : TRANSITIONS ───────────────────────────────
@@ -323,6 +377,9 @@ const FocusSystem = {
       } else {
         this._log(0, `Flow State monte à ${names[newPalier]} !`);
       }
+
+      // Son Flow State
+      if (typeof SoundManager !== 'undefined') SoundManager.playFlowEnter(newPalier);
     }
   },
 
@@ -359,7 +416,10 @@ const FocusSystem = {
       this.current = this.max;
     }
 
-    if (wasInFlow) this._log(0, 'Flow State terminé');
+    if (wasInFlow) {
+      this._log(0, 'Flow State terminé');
+      if (typeof SoundManager !== 'undefined') SoundManager.playFlowExit();
+    }
   },
 
   /**
@@ -420,6 +480,9 @@ const FocusSystem = {
 
     ChessEngine.setUsedStockfish();
 
+    // Son
+    if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+
     // Gestion du Flow State
     if (this.flowPalier > 0) {
       if (this.flowPalier === 4) {
@@ -436,6 +499,45 @@ const FocusSystem = {
       this.consecutiveGoodMoves = 0;
     }
 
+    return true;
+  },
+
+  // ── REPRISE DE COUP ──────────────────────────────────────────
+
+  /**
+   * Vérifie si le joueur peut se payer une reprise de coup.
+   * @returns {boolean}
+   */
+  canTakeback() {
+    return this.current >= this.TAKEBACK_COST;
+  },
+
+  /**
+   * Active une reprise de coup.
+   * - Coût : TAKEBACK_COST en Focus
+   * - Pénalité max : TAKEBACK_MAX_PENALTY (composée)
+   * - Sort du Flow State
+   * @returns {boolean} true si activé
+   */
+  activateTakeback() {
+    if (!this.canTakeback()) return false;
+
+    this.apply(-this.TAKEBACK_COST, 'Reprise de coup');
+
+    // Son
+    if (typeof SoundManager !== 'undefined') SoundManager.playTakeback();
+
+    // Pénalité permanente au max
+    this.max = Math.max(20, Math.round(this.max * (1 - this.TAKEBACK_MAX_PENALTY)));
+
+    // Sort du Flow State
+    if (this.flowPalier > 0) {
+      this._exitFlow();
+    } else {
+      this.consecutiveGoodMoves = 0;
+    }
+
+    this.render();
     return true;
   },
 
@@ -561,10 +663,14 @@ const FocusSystem = {
     if (flowStatus) {
       if (this.flowPalier > 0) {
         const names = ['', 'I', 'II', 'III', 'MAX'];
-        const info  = this.getFlowStateInfo();
-        const progressText = this.flowPalier < 4
-          ? ` (${this.consecutiveGoodMoves}/${info.nextPalierAt})`
-          : '';
+        let progressText = '';
+        if (this.flowPalier < 4) {
+          const currentThreshold = this.FLOW_THRESHOLDS[this.flowPalier];
+          const nextThreshold    = this.FLOW_THRESHOLDS[this.flowPalier + 1];
+          const done   = this.consecutiveGoodMoves - currentThreshold;
+          const needed = nextThreshold - currentThreshold;
+          progressText = ` (${done}/${needed})`;
+        }
         flowStatus.innerHTML = '<span class="badge badge-warning badge-lg flow-badge-active">' +
           `Flow ${names[this.flowPalier]}${progressText}</span>`;
       } else if (this.consecutiveGoodMoves >= 1) {
@@ -580,37 +686,42 @@ const FocusSystem = {
     const flowBtn = document.getElementById('btn-flow-state');
     if (flowBtn) flowBtn.classList.add('hidden');
 
-    // ── Boutons Stockfish avec coûts effectifs ──
-    const sfLabels = { 1: 'Évaluateur de coup', 2: 'Guide pièce', 3: 'Meilleur coup' };
-    [1, 2, 3].forEach(lvl => {
-      const btn     = document.getElementById('btn-sf' + lvl);
-      const tooltip = document.getElementById('tooltip-sf' + lvl);
-      if (!btn) return;
+    // ── Bouton Stockfish N3 (seul niveau disponible) ──
+    {
+      const lvl = 3;
+      const btn     = document.getElementById('btn-sf3');
+      const tooltip = document.getElementById('tooltip-sf3');
+      if (btn) {
+        const flowCost     = this._getFlowAdjustedCost(lvl);
+        const baseCost     = this.SF_COSTS[lvl];
+        const isFree       = flowCost === 0;
+        const insufficient = this.current < flowCost;
+        btn.disabled = insufficient;
 
-      const flowCost     = this._getFlowAdjustedCost(lvl);
-      const baseCost     = this.SF_COSTS[lvl];
-      const isFree       = flowCost === 0;
-      const insufficient = this.current < flowCost;
-      btn.disabled = insufficient;
-
-      if (isFree) {
-        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (GRATUIT ⚡)`;
-      } else if (flowCost < baseCost) {
-        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (-${flowCost}% au lieu de ${baseCost}%)`;
-      } else {
-        btn.textContent = `N${lvl} — ${sfLabels[lvl]} (-${baseCost}%)`;
-      }
-
-      if (tooltip) {
-        if (insufficient) {
-          tooltip.dataset.tip = `Focus insuffisant (${flowCost}% requis)`;
-        } else if (isFree) {
-          tooltip.dataset.tip = 'Gratuit en Flow State — mais sort du Flow !';
+        if (isFree) {
+          btn.textContent = `N3 — Meilleur coup (GRATUIT ⚡)`;
         } else {
-          tooltip.dataset.tip = '';
+          btn.textContent = `N3 — Meilleur coup (-${baseCost}%)`;
+        }
+
+        if (tooltip) {
+          if (insufficient) {
+            tooltip.dataset.tip = `Focus insuffisant (${flowCost}% requis)`;
+          } else if (isFree) {
+            tooltip.dataset.tip = 'Gratuit en Flow State — mais sort du Flow !';
+          } else {
+            tooltip.dataset.tip = '';
+          }
         }
       }
-    });
+    }
+
+    // ── Bouton Reprise de coup ──
+    const takebackBtn = document.getElementById('btn-takeback');
+    if (takebackBtn) {
+      takebackBtn.disabled = !this.canTakeback();
+      takebackBtn.textContent = `Reprise de coup (-${this.TAKEBACK_COST}%)`;
+    }
 
     // ── Tremblement continu zone noire (0-5%) sur la barre de focus ──
     const focusBarWrap = document.getElementById('focus-bar-wrap');

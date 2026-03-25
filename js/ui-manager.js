@@ -17,11 +17,17 @@ const UIManager = {
   _opponentElo:   null,
 
   // ── ÉTAT STOCKFISH VISUEL ──────────────────────────────────
-  sfEvalActive:     false,   // N1 : mode évaluateur actif
-  sfEvalConsumed:   false,   // N1 : l'unique évaluation a été utilisée
-  sfEvalPending:    null,    // N1 : { from, to } du coup en attente de confirmation
-  sfGuideSquare:    null,    // N2 : case de la pièce à jouer
   sfArrow:          null,    // N3 : { from, to } de la flèche
+
+  // ── ÉTAT FLOW REWARDS ────────────────────────────────────────
+  flowThreats:        [],    // Flow I : [{from, to}] flèches rouges menaces
+  flowHighlights:     [],    // Flow II/III : cases des pièces surbrillance
+  flowCorrectSquare:  null,  // case source du meilleur coup (pour vérifier le choix)
+  _flowRewardsLoading: false,
+
+  // ── ÉVALUATION DES COUPS ────────────────────────────────────
+  _moveEvals:        {},     // { ply: evalInfo } — évaluation de chaque coup joueur
+  _moveEvalSquares:  {},     // { ply: square } — case destination pour le texte flottant
 
   PIECES: {
     wK: 'assets/pieces/wK.png', wQ: 'assets/pieces/wQ.png',
@@ -57,6 +63,9 @@ const UIManager = {
     this._bindButtons();
     this.renderBoard();
     FocusSystem.render();
+
+    // Callback pour recevoir les évaluations de coups du FocusSystem
+    FocusSystem.setMoveEvalCallback((evalInfo) => this._onMoveEvaluated(evalInfo));
 
     if (!CareerManager.hasCharacter()) {
       this._openCharacterCreation();
@@ -182,7 +191,7 @@ const UIManager = {
         if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
         if (captureTargets.includes(square))                                   el.classList.add('legal-capture');
         if (inCheck && square === kingSquare)                                  el.classList.add('in-check');
-        if (this.sfGuideSquare === square)                                     el.classList.add('sf-guide');
+        if (this.flowHighlights.includes(square))                             el.classList.add('flow-highlight');
 
         if (fi === 0) {
           const r = document.createElement('span');
@@ -214,10 +223,11 @@ const UIManager = {
     // Flèche SVG N3
     this._renderArrow();
 
-    // N1 : réafficher le badge si un coup est en attente de confirmation
-    if (this.sfEvalPending) {
-      this._showPendingBadge();
-    }
+    // Flèches rouges de menaces (Flow I+)
+    this._renderThreatArrows();
+
+    // Pièces capturées
+    this._renderCapturedPieces();
   },
 
   // ── SURBRILLANCES ────────────────────────────────────────────
@@ -243,9 +253,20 @@ const UIManager = {
   },
 
   updateMoveHistory() {
-    const history = ChessEngine.getHistory();
-    const list    = document.getElementById('moves-list');
+    const history     = ChessEngine.getHistory();
+    const list        = document.getElementById('moves-list');
+    const playerColor = ChessEngine.getPlayerColor();
     list.innerHTML = '';
+
+    // Annotations chess-standard pour chaque classification
+    const EVAL_SYMBOLS = {
+      best:        { sym: '!!', cls: 'eval-best' },
+      excellent:   { sym: '!',  cls: 'eval-excellent' },
+      good:        { sym: '',   cls: 'eval-good' },
+      neutral:     { sym: '',   cls: '' },
+      imprecision: { sym: '?!', cls: 'eval-imprecis' },
+      blunder:     { sym: '??', cls: 'eval-blunder' },
+    };
 
     for (let i = 0; i < history.length; i += 2) {
       const row = document.createElement('div');
@@ -263,6 +284,15 @@ const UIManager = {
       black.className   = 'move-black';
       black.textContent = history[i + 1] || '';
 
+      // Annotation d'évaluation pour les coups du joueur
+      // history[i] = ply i+1 (blancs), history[i+1] = ply i+2 (noirs)
+      if (playerColor === 'w') {
+        this._appendEvalAnnotation(white, i + 1);
+      }
+      if (playerColor === 'b' && history[i + 1]) {
+        this._appendEvalAnnotation(black, i + 2);
+      }
+
       row.appendChild(num);
       row.appendChild(white);
       row.appendChild(black);
@@ -270,6 +300,28 @@ const UIManager = {
     }
 
     list.scrollTop = list.scrollHeight;
+  },
+
+  /**
+   * Ajoute un badge d'annotation (!! ! ?! ??) après le texte d'un coup dans l'historique.
+   */
+  _appendEvalAnnotation(moveSpan, ply) {
+    const evalInfo = this._moveEvals[ply];
+    if (!evalInfo || evalInfo.key === 'neutral' || evalInfo.key === 'good') return;
+
+    const SYMBOLS = {
+      best:        '!!',
+      excellent:   '!',
+      imprecision: '?',
+      blunder:     '?!',
+    };
+    const sym = SYMBOLS[evalInfo.key];
+    if (!sym) return;
+
+    const badge = document.createElement('span');
+    badge.className   = 'move-eval ' + evalInfo.cls;
+    badge.textContent = sym;
+    moveSpan.appendChild(badge);
   },
 
   // ── GESTION DES CLICS ────────────────────────────────────────
@@ -286,10 +338,6 @@ const UIManager = {
     if (piece && piece.color === turn) {
       this.selectedSquare = square;
       this.legalMoves     = ChessEngine.getLegalMoves(square);
-      // N2 : effacer la surbrillance guide quand le joueur sélectionne une pièce
-      this.sfGuideSquare  = null;
-      // N1 : effacer le badge en attente (changement de pièce)
-      this.sfEvalPending  = null;
       // Lancer l'évaluation anticipée pendant que le joueur choisit sa case
       ChessEngine.prefetchEval();
       this.renderBoard();
@@ -300,20 +348,10 @@ const UIManager = {
     if (this.selectedSquare) {
       const move = this.legalMoves.find(m => m.to === square);
       if (move) {
-        // N1 : si évaluation active et pas encore consommée → évaluer au lieu de jouer
-        if (this.sfEvalActive && !this.sfEvalConsumed) {
-          this.sfEvalConsumed = true;
-          this.sfEvalPending  = { from: move.from, to: move.to };
-          this._evaluateSingleMove(move);
-          return;
-        }
-        // N1 : si on reclique sur la case évaluée → jouer le coup
-        // Sinon (eval consommée, autre case) → jouer normalement
         this._executeMove(move);
       } else {
         this.selectedSquare = null;
         this.legalMoves     = [];
-        this.sfEvalPending  = null;
         this.renderBoard();
       }
     }
@@ -362,6 +400,8 @@ const UIManager = {
     this.pendingPromotion = null;
     this._aiThinking      = false;
     this._clearStockfishVisuals();
+    this._moveEvals       = {};
+    this._moveEvalSquares = {};
 
     FocusSystem.resetForGame();
 
@@ -401,6 +441,16 @@ const UIManager = {
   _applyMove(from, to, promo = 'q') {
     const move = ChessEngine.makeMove(from, to, promo);
     if (!move) return;
+
+    // Son de déplacement (ou capture)
+    if (typeof SoundManager !== 'undefined') {
+      if (move.captured) SoundManager.playCapture();
+      else               SoundManager.playMove();
+    }
+
+    // Tracer la case destination pour le texte flottant d'évaluation
+    const ply = ChessEngine.getHistory().length;
+    this._moveEvalSquares[ply] = to;
 
     this.lastMove       = { from, to };
     this.selectedSquare = null;
@@ -522,81 +572,247 @@ const UIManager = {
     container.appendChild(img);
   },
 
-  /**
-   * N1 — Évalue UN SEUL coup et affiche le badge sur la case destination.
-   * Le coup n'est PAS joué — le joueur doit recliquer pour confirmer.
-   */
-  async _evaluateSingleMove(move) {
-    const sq = move.to;
+  /** Dessine les flèches rouges de menaces (Flow I+). */
+  _renderThreatArrows() {
+    // Nettoyer les anciennes flèches
+    document.querySelectorAll('.threat-arrow-img').forEach(el => el.remove());
 
-    // Badge loading
-    const el = document.querySelector(`[data-square="${sq}"]`);
-    if (el) {
-      const badge = document.createElement('span');
-      badge.className = 'sf-eval-badge eval-loading';
-      badge.textContent = '…';
-      badge.dataset.evalBadge = sq;
-      el.appendChild(badge);
+    if (this.flowThreats.length === 0) return;
+
+    const container = document.getElementById('board-container');
+    if (!container) return;
+
+    this.flowThreats.forEach((threat, i) => {
+      const from = this._squareToXY(threat.from);
+      const to   = this._squareToXY(threat.to);
+
+      const dx    = to.x - from.x;
+      const dy    = to.y - from.y;
+      const dist  = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      const cx    = (from.x + to.x) / 2;
+      const cy    = (from.y + to.y) / 2;
+
+      const el = document.createElement('div');
+      el.className = 'threat-arrow-img';
+      const h = 24;
+      el.style.width     = dist + 'px';
+      el.style.height    = h + 'px';
+      el.style.left      = (cx - dist / 2) + 'px';
+      el.style.top       = (cy - h / 2) + 'px';
+      el.style.transform = `rotate(${angle}deg)`;
+
+      container.appendChild(el);
+    });
+  },
+
+  /** Affiche les pièces capturées de chaque côté avec la différence matérielle. */
+  _renderCapturedPieces() {
+    const capWhiteEl = document.getElementById('captured-white');
+    const capBlackEl = document.getElementById('captured-black');
+    if (!capWhiteEl || !capBlackEl) return;
+
+    const { byWhite, byBlack, diff } = ChessEngine.getCapturedPieces();
+    const playerColor = ChessEngine.getPlayerColor();
+
+    // Le joueur est toujours en bas. "captured-white" est en bas, "captured-black" en haut.
+    // En bas : pièces que le joueur a capturées
+    // En haut : pièces que l'adversaire a capturées
+    const playerCaptures   = playerColor === 'w' ? byWhite : byBlack;
+    const opponentCaptures = playerColor === 'w' ? byBlack : byWhite;
+    const playerDiff       = playerColor === 'w' ? diff : -diff;
+
+    capWhiteEl.innerHTML = '';
+    capBlackEl.innerHTML = '';
+
+    // Rendu des mini-pièces capturées (en bas = joueur, en haut = adversaire)
+    this._fillCapturedRow(capWhiteEl, playerCaptures, playerDiff > 0 ? playerDiff : 0);
+    this._fillCapturedRow(capBlackEl, opponentCaptures, playerDiff < 0 ? -playerDiff : 0);
+  },
+
+  _fillCapturedRow(container, pieces, advantage) {
+    pieces.forEach(key => {
+      const img = document.createElement('img');
+      img.src       = this.PIECES[key];
+      img.alt       = key;
+      img.draggable = false;
+      img.className = 'captured-piece-img';
+      container.appendChild(img);
+    });
+    if (advantage > 0) {
+      const span = document.createElement('span');
+      span.className   = 'captured-advantage';
+      span.textContent = '+' + advantage;
+      container.appendChild(span);
+    }
+  },
+
+  // ── FLOW REWARDS (surbrillances) ────────────────────────────
+
+  /**
+   * Sélectionne les pièces à mettre en surbrillance selon le palier Flow.
+   * Flow II : 3 pièces (1 correcte + 1 leurre crédible + 1 piège attractif)
+   * Flow III/MAX : 2 pièces (1 correcte + 1 leurre/piège)
+   */
+  async _computeFlowHighlights(palier) {
+    const pvLines = await ChessEngine.getMultiPV(8);
+    if (pvLines.length === 0) { this.flowHighlights = []; return; }
+
+    const bestMove = pvLines[0];
+    const bestFrom = bestMove.move.substring(0, 2);
+    this.flowCorrectSquare = bestFrom;
+
+    // Grouper les coups par pièce source
+    const byPiece = {};
+    for (const pv of pvLines) {
+      const from = pv.move.substring(0, 2);
+      if (!byPiece[from]) byPiece[from] = [];
+      byPiece[from].push(pv);
     }
 
-    document.getElementById('sf-feedback').textContent = 'N1 — Évaluation en cours…';
+    // Candidats leurres crédibles : pièces différentes du meilleur coup,
+    // dont le meilleur coup est dans les 120cp du top
+    const credible = [];
+    for (const [sq, moves] of Object.entries(byPiece)) {
+      if (sq === bestFrom) continue;
+      const bestCp = moves[0].cp;
+      const delta  = bestMove.cp - bestCp;
+      if (delta <= 120 && delta >= 0) {
+        credible.push({ square: sq, delta });
+      }
+    }
+    credible.sort((a, b) => a.delta - b.delta);
 
-    const deltaCp = await ChessEngine.evaluateMoveQuality(move.from, move.to);
-    const abs     = Math.abs(deltaCp);
-    const { label, cls } = this._evalLabel(abs);
+    // Candidats pièges : pièces avec un coup qui SEMBLE bon (capture ou échec)
+    // mais dont l'éval est > 100cp pire que le meilleur coup
+    const traps = [];
+    const fen  = ChessEngine.getFEN();
+    const allMoves = ChessEngine.getLegalMoves();
 
-    // Vérifier que le badge est toujours pertinent (pas changé de pièce entre temps)
-    if (!this.sfEvalPending || this.sfEvalPending.to !== sq) return;
+    for (const m of allMoves) {
+      if (m.from === bestFrom) continue;
+      const isCapture = m.flags.includes('c') || m.flags.includes('e');
+      const isCheck   = m.san.includes('+');
+      if (!isCapture && !isCheck) continue;
 
-    // Stocker le résultat pour _showPendingBadge (après re-render)
-    this.sfEvalPending.label = label;
-    this.sfEvalPending.cls   = cls;
+      // Vérifier si ce coup est dans les PV (si oui, c'est crédible, pas un piège)
+      const inPV = pvLines.some(pv => pv.move === m.from + m.to);
+      if (inPV) continue;
 
-    const badge = document.querySelector(`[data-eval-badge="${sq}"]`);
-    if (badge) {
-      badge.textContent = label;
-      badge.className   = 'sf-eval-badge ' + cls;
+      // Ce coup agressif n'est PAS dans les top 8 → probablement mauvais
+      if (!traps.find(t => t.square === m.from)) {
+        traps.push({
+          square:    m.from,
+          isCapture: isCapture,
+          isCheck:   isCheck,
+          piece:     m.piece,
+        });
+      }
     }
 
-    document.getElementById('sf-feedback').textContent =
-      `N1 — ${label}. Clique à nouveau pour jouer ce coup.`;
+    // Elo-based trap probability
+    const elo = typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()
+      ? CareerManager.getPlayer().elo : 800;
+    const trapChance = elo < 1200 ? 0.6 : elo < 1600 ? 0.5 : 0.35;
+
+    // Sélection finale
+    const numPieces = palier >= 3 ? 2 : 3;
+    const highlights = [bestFrom];
+
+    if (numPieces === 3) {
+      // Flow II : 1 correct + 1 crédible + 1 piège (ou 2 crédibles si pas de piège)
+      const useTraps = traps.length > 0 && Math.random() < trapChance;
+
+      if (useTraps) {
+        // 1 crédible + 1 piège
+        if (credible.length > 0) highlights.push(credible[0].square);
+        highlights.push(traps[Math.floor(Math.random() * traps.length)].square);
+      } else {
+        // 2 crédibles
+        for (let i = 0; i < 2 && i < credible.length; i++) {
+          highlights.push(credible[i].square);
+        }
+      }
+
+      // Compléter si pas assez de candidats
+      if (highlights.length < 3) {
+        for (const t of traps) {
+          if (highlights.length >= 3) break;
+          if (!highlights.includes(t.square)) highlights.push(t.square);
+        }
+      }
+      if (highlights.length < 3) {
+        for (const m of allMoves) {
+          if (highlights.length >= 3) break;
+          if (!highlights.includes(m.from) && m.from !== bestFrom) highlights.push(m.from);
+        }
+      }
+    } else {
+      // Flow III : 1 correct + 1 leurre/piège
+      const useTraps = traps.length > 0 && Math.random() < trapChance;
+      if (useTraps) {
+        highlights.push(traps[Math.floor(Math.random() * traps.length)].square);
+      } else if (credible.length > 0) {
+        highlights.push(credible[0].square);
+      } else if (traps.length > 0) {
+        highlights.push(traps[0].square);
+      } else {
+        // Fallback : n'importe quelle autre pièce
+        for (const m of allMoves) {
+          if (!highlights.includes(m.from)) { highlights.push(m.from); break; }
+        }
+      }
+    }
+
+    // Mélanger pour que la bonne pièce ne soit pas toujours en premier
+    for (let i = highlights.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [highlights[i], highlights[j]] = [highlights[j], highlights[i]];
+    }
+
+    this.flowHighlights = highlights;
   },
 
-  /**
-   * Réaffiche le badge N1 après un re-render du plateau (si un coup est en attente).
-   */
-  _showPendingBadge() {
-    if (!this.sfEvalPending || !this.sfEvalPending.label) return;
-    const sq = this.sfEvalPending.to;
-    const el = document.querySelector(`[data-square="${sq}"]`);
-    if (!el) return;
-    const badge = document.createElement('span');
-    badge.className   = 'sf-eval-badge ' + this.sfEvalPending.cls;
-    badge.textContent = this.sfEvalPending.label;
-    badge.dataset.evalBadge = sq;
-    el.appendChild(badge);
-  },
-
-  /**
-   * Retourne le label et la classe CSS pour un delta cp donné.
-   */
-  _evalLabel(absCp) {
-    if (absCp === 0)        return { label: 'Meilleur',     cls: 'eval-best' };
-    if (absCp <= 30)        return { label: 'Très bon',     cls: 'eval-tres-bon' };
-    if (absCp <= 80)        return { label: 'Bon',          cls: 'eval-bon' };
-    if (absCp <= 150)       return { label: 'Correct',      cls: 'eval-correct' };
-    if (absCp <= 250)       return { label: 'Imprécis',     cls: 'eval-imprecis' };
-    if (absCp <= 400)       return { label: 'Mauvais',      cls: 'eval-mauvais' };
-    return                           { label: 'Blunder',      cls: 'eval-blunder' };
-  },
-
-  /** Efface tous les visuels Stockfish (N1 badges, N2 highlight, N3 flèche). */
+  /** Efface tous les visuels Stockfish et Flow rewards. */
   _clearStockfishVisuals() {
-    this.sfEvalActive   = false;
-    this.sfEvalConsumed = false;
-    this.sfEvalPending  = null;
-    this.sfGuideSquare  = null;
-    this.sfArrow        = null;
+    this.sfArrow          = null;
+    this.flowThreats      = [];
+    this.flowHighlights   = [];
+    this.flowCorrectSquare = null;
+  },
+
+  // ── ÉVALUATION DES COUPS (callback FocusSystem) ─────────────
+
+  /**
+   * Appelé par FocusSystem après chaque évaluation de coup du joueur.
+   * Met à jour l'historique et affiche le texte flottant sur l'échiquier.
+   */
+  _onMoveEvaluated(evalInfo) {
+    if (!evalInfo || !evalInfo.ply) return;
+    this._moveEvals[evalInfo.ply] = evalInfo;
+    this.updateMoveHistory();
+
+    // Texte flottant sur la case destination
+    const square = this._moveEvalSquares[evalInfo.ply];
+    if (square && evalInfo.key !== 'neutral') {
+      this._showFloatingEval(square, evalInfo);
+    }
+  },
+
+  /**
+   * Affiche un texte flottant animé (monte + disparaît) sur la case indiquée.
+   */
+  _showFloatingEval(square, evalInfo) {
+    const el = document.querySelector(`[data-square="${square}"]`);
+    if (!el) return;
+
+    const float = document.createElement('span');
+    float.className   = 'floating-eval ' + evalInfo.cls;
+    float.textContent = evalInfo.label;
+    el.appendChild(float);
+
+    // Supprimer après l'animation (1.5s)
+    setTimeout(() => float.remove(), 1600);
   },
 
   // ── MAIA UI (barre de progression dashboard) ────────────────
@@ -654,33 +870,22 @@ const UIManager = {
     this._aiThinking = true;
     this.showStatus('L\'adversaire réfléchit…');
 
-    // Délai naturel (400-1000 ms)
-    await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
-
-    // Vérifier que la partie est toujours en cours
-    if (ChessEngine.isGameOver() || ChessEngine.getTurn() === ChessEngine.getPlayerColor()) {
-      this._aiThinking = false;
-      return;
-    }
-
     try {
       const fen       = ChessEngine.getFEN();
       const playerElo = CareerManager.getPublicStats().elo;
 
-      // Opening book : 5 premiers demi-coups → Lichess Explorer
+      // 1. Obtenir le coup de l'IA
       let move = null;
       const plyCount = ChessEngine.getHistory().length;
       if (plyCount < 5) {
         const bookMove = await MaiaEngine.getOpeningMove(fen);
         if (bookMove) move = bookMove;
       }
-      // Fallback : Maia
       if (!move) {
         const result = await MaiaEngine.getMove(fen, this._opponentElo, playerElo);
         move = result.move;
       }
 
-      // Vérifier que la position n'a pas changé pendant l'inférence
       if (ChessEngine.isGameOver() || ChessEngine.getFEN() !== fen) {
         this._aiThinking = false;
         return;
@@ -690,11 +895,38 @@ const UIManager = {
       const to    = move.substring(2, 4);
       const promo = move.length > 4 ? move[4] : 'q';
 
-      const result = ChessEngine.makeMove(from, to, promo);
-      if (!result) {
+      // 2. Appliquer le coup silencieusement (pas de render encore)
+      const moveResult = ChessEngine.makeMove(from, to, promo);
+      if (!moveResult) {
         console.error('[AI] Coup illégal de Maia:', move);
         this._aiThinking = false;
         return;
+      }
+
+      // 3. Délai "réflexion" en parallèle de : attente éval Focus + Flow rewards
+      const minDelay = new Promise(r => setTimeout(r, 800 + Math.random() * 700));
+
+      // Attendre que l'éval Focus du coup précédent termine
+      // avant de toucher au worker Stockfish (multiPV, etc.)
+      const flowRewardsPromise = (async () => {
+        await ChessEngine.waitForBgEval();
+        const flowInfo = FocusSystem.getFlowStateInfo();
+        // Menaces (synchrone, rapide)
+        if (flowInfo.palier >= 1) {
+          this.flowThreats = ChessEngine.getThreats();
+        }
+        // Surbrillances multiPV (async, utilise le worker)
+        if (flowInfo.palier >= 2) {
+          await this._computeFlowHighlights(flowInfo.palier);
+        }
+      })();
+
+      await Promise.all([minDelay, flowRewardsPromise]);
+
+      // 4. Son + rendu (tout d'un coup, après le "temps de réflexion")
+      if (typeof SoundManager !== 'undefined') {
+        if (moveResult.captured) SoundManager.playCapture();
+        else                     SoundManager.playMove();
       }
 
       this.lastMove = { from, to };
@@ -762,35 +994,25 @@ const UIManager = {
 
     document.getElementById('btn-new-game').onclick = () => this.newGame();
 
-    // N1 — Évaluateur : active le mode (badge au prochain clic destination)
-    document.getElementById('btn-sf1').onclick = () => {
-      if (!FocusSystem.activateStockfish(1)) return;
-      this.sfEvalActive   = true;
-      this.sfEvalConsumed = false;
-      this.sfEvalPending  = null;
-      document.getElementById('sf-feedback').textContent =
-        'N1 actif — joue un coup pour voir son évaluation avant de confirmer.';
-    };
-
-    // N2 — Guide pièce : met en surbrillance bleue la pièce à jouer
-    document.getElementById('btn-sf2').onclick = async () => {
-      if (!FocusSystem.activateStockfish(2)) return;
-      document.getElementById('sf-feedback').textContent = 'N2 — Analyse en cours…';
-      const best = await ChessEngine.getBestMove();
-      if (best) {
-        this.sfGuideSquare = best.from;
-        document.getElementById('sf-feedback').textContent =
-          'N2 actif — la pièce en surbrillance bleue devrait jouer.';
-        this.renderBoard();
-      } else {
-        document.getElementById('sf-feedback').textContent = 'N2 — Aucun coup trouvé.';
-      }
-    };
-
-    // N3 — Meilleur coup : flèche SVG source → destination
+    // N3 — Meilleur coup : flèche source → destination
     document.getElementById('btn-sf3').onclick = async () => {
-      if (!FocusSystem.activateStockfish(3)) return;
+      // Bloquer pendant le tour de l'IA
+      if (this._aiThinking) return;
+
+      // En Flow III+ : N3 gratuit (pas de coût Focus, mais pénalité max + sort du Flow)
+      const flowInfo = FocusSystem.getFlowStateInfo();
+      const isFreeN3 = flowInfo.palier >= 3;
+
+      if (isFreeN3) {
+        // N3 gratuit en Flow III+ : applique seulement la pénalité max et sort du Flow
+        FocusSystem.activateStockfish(3);
+      } else {
+        if (!FocusSystem.activateStockfish(3)) return;
+      }
       document.getElementById('sf-feedback').textContent = 'N3 — Analyse en cours…';
+
+      // Attendre que l'éval Focus termine pour ne pas corrompre le worker
+      await ChessEngine.waitForBgEval();
       const best = await ChessEngine.getBestMove();
       if (best) {
         this.sfArrow = { from: best.from, to: best.to };
@@ -800,6 +1022,26 @@ const UIManager = {
       } else {
         document.getElementById('sf-feedback').textContent = 'N3 — Aucun coup trouvé.';
       }
+    };
+
+    // Reprise de coup
+    document.getElementById('btn-takeback').onclick = () => {
+      // Ne pas permettre pendant le tour de l'IA
+      if (this._aiThinking) return;
+      if (ChessEngine.getHistory().length === 0) return;
+      if (!FocusSystem.activateTakeback()) return;
+
+      // Annuler le(s) coup(s) dans le moteur
+      if (!ChessEngine.takeback()) return;
+
+      // Rafraîchir l'UI
+      this.lastMove       = null;
+      this.selectedSquare = null;
+      this.legalMoves     = [];
+      this._clearStockfishVisuals();
+      this.renderBoard();
+      this.updateMoveHistory();
+      this.showStatus('Coup repris — à toi de jouer.');
     };
 
     // Revue post-partie — fermeture
@@ -860,6 +1102,17 @@ window.addEventListener('DOMContentLoaded', () => {
           btnMusic.classList.add('music-on');
         }).catch(() => {});
       }
+    });
+  }
+
+  // ── Toggle SFX ──
+  const btnSfx = document.getElementById('btn-sfx');
+  if (btnSfx) {
+    btnSfx.addEventListener('click', () => {
+      const on = !SoundManager.isEnabled();
+      SoundManager.setEnabled(on);
+      btnSfx.textContent = on ? 'SFX ON' : 'SFX OFF';
+      btnSfx.classList.toggle('music-on', on);
     });
   }
 });
