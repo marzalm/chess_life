@@ -168,7 +168,6 @@
         <div id="captured-black"></div>
         <div id="board-container">
           <div id="board"></div>
-          <!-- La flèche N3 est maintenant un sprite IMG positionné par JS -->
         </div>
         <div id="captured-white"></div>
       </div>
@@ -288,6 +287,31 @@
     <div class="modal-box bg-base-200 border border-primary/30 text-center">
       <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;">Promotion — choisissez la pièce</h3>
       <div id="promotion-choices" class="flex gap-4 justify-center"></div>
+    </div>
+  </dialog>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL : CHOIX DE COULEUR (DaisyUI dialog)
+  ══════════════════════════════════════════════════════════════ -->
+  <dialog id="modal-color-choice" class="modal">
+    <div class="modal-box bg-base-200 border border-primary/30 text-center" style="max-width:360px;">
+      <h3 class="font-bold mb-5" style="font-family:'Press Start 2P',monospace;font-size:11px;color:#e8c98a;">
+        Choisis ton camp
+      </h3>
+      <div class="flex justify-center gap-4 mb-2">
+        <button id="pick-white" class="color-pick-btn" title="Jouer les Blancs">
+          <img src="assets/pieces/wK.png" alt="Blancs" class="color-pick-img">
+          <span class="color-pick-label">Blancs</span>
+        </button>
+        <button id="pick-random" class="color-pick-btn color-pick-random" title="Au hasard">
+          <span class="color-pick-dice">?</span>
+          <span class="color-pick-label">Hasard</span>
+        </button>
+        <button id="pick-black" class="color-pick-btn" title="Jouer les Noirs">
+          <img src="assets/pieces/bK.png" alt="Noirs" class="color-pick-img">
+          <span class="color-pick-label">Noirs</span>
+        </button>
+      </div>
     </div>
   </dialog>
 

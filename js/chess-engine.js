@@ -200,7 +200,19 @@ const ChessEngine = (() => {
     const deltaCp = cpBefore + cpAfter;
     console.log(`[Engine] cpBefore=${cpBefore}  cpAfter=${cpAfter}(adv)  delta=${deltaCp}`);
 
-    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null, plyIndex);
+    // Vérifier si le coup a été joué dans une position de livre d'ouverture
+    const isBookMove = typeof MaiaEngine !== 'undefined' && MaiaEngine.isBookPosition(fenBefore);
+
+    // Compter les pièces sur l'échiquier (pour la pondération de complexité)
+    let pieceCount = 0;
+    const board = _game.board();
+    for (const row of board) {
+      for (const sq of row) {
+        if (sq) pieceCount++;
+      }
+    }
+
+    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null, plyIndex, isBookMove, pieceCount);
 
     _bgEvalRunning = false;
 

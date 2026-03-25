@@ -280,13 +280,26 @@ const FocusSystem = {
    * @param {string|null} captured  - type de pièce capturée ('p','n','b','r','q') ou null
    * @param {number}  [plyIndex=0]  - numéro du demi-coup (pour traçabilité UI)
    */
-  evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex) {
+  evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex, isBookMove, pieceCount) {
     const abs = Math.abs(deltaCp);
     const threshold = this._getGoodMoveThreshold();
 
+    // Complexité de la position : 32 pièces = 1.0, 10 pièces = 0.4, 6 = 0.25
+    // Réduit les gains de flow en finale triviale
+    const complexity = pieceCount != null
+      ? Math.max(0.25, Math.min(1.0, (pieceCount - 4) / 28))
+      : 1.0;
+
     // Classification du coup (pour l'UI : historique + texte flottant)
-    const evalInfo = this._classifyMove(abs, threshold);
+    let evalInfo;
+    if (isBookMove && abs < threshold) {
+      // Coup de livre d'ouverture — classification spéciale
+      evalInfo = { key: 'book', label: '📖', cls: 'eval-book' };
+    } else {
+      evalInfo = this._classifyMove(abs, threshold);
+    }
     evalInfo.ply = plyIndex || 0;
+    evalInfo.isBookMove = !!isBookMove;
     this.lastMoveEval = evalInfo;
 
     // 1. Capture micro-regen (indépendant de la qualité du coup)
@@ -298,11 +311,20 @@ const FocusSystem = {
     if (abs < threshold && !sfUsed) {
       // ── Bon ou meilleur coup ──
       const isBest = abs <= 12;
-      const gain   = this._getMomentumGain(isBest);
+      const gain   = Math.round(this._getMomentumGain(isBest) * complexity);
       this.apply(+gain, isBest ? 'Meilleur coup' : 'Bon coup');
 
-      // Incrémenter le compteur et recalculer le palier Flow
-      this.consecutiveGoodMoves++;
+      // Incrémenter le compteur :
+      //   - 0.5x pour les coups de livre (ouvertures théoriques)
+      //   - pondéré par la complexité en finale (min 0.5x à 6 pièces)
+      let increment = 1;
+      if (isBookMove) {
+        increment = 0.5;
+      } else if (complexity < 0.7) {
+        // Finale simple → crédit réduit proportionnellement
+        increment = Math.max(0.5, complexity);
+      }
+      this.consecutiveGoodMoves += increment;
       this._updateFlowFromCounter();
 
       // Son
@@ -667,14 +689,14 @@ const FocusSystem = {
         if (this.flowPalier < 4) {
           const currentThreshold = this.FLOW_THRESHOLDS[this.flowPalier];
           const nextThreshold    = this.FLOW_THRESHOLDS[this.flowPalier + 1];
-          const done   = this.consecutiveGoodMoves - currentThreshold;
+          const done   = Math.floor(this.consecutiveGoodMoves - currentThreshold);
           const needed = nextThreshold - currentThreshold;
           progressText = ` (${done}/${needed})`;
         }
         flowStatus.innerHTML = '<span class="badge badge-warning badge-lg flow-badge-active">' +
           `Flow ${names[this.flowPalier]}${progressText}</span>`;
       } else if (this.consecutiveGoodMoves >= 1) {
-        flowStatus.textContent = `Momentum : ${this.consecutiveGoodMoves}/3`;
+        flowStatus.textContent = `Momentum : ${Math.floor(this.consecutiveGoodMoves)}/3`;
         flowStatus.className   = 'flow-status flow-status-passive';
       } else {
         flowStatus.textContent = '';

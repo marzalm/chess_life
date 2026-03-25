@@ -341,6 +341,60 @@
 .move-eval.eval-excellent   { color: #4ade80; }
 .move-eval.eval-imprecis    { color: #f97316; }
 .move-eval.eval-blunder     { color: #e24b4a; }
+.move-eval.eval-book        { color: #c9a87c; font-style: normal; font-size: 10px; }
+
+/* ── CHOIX DE COULEUR ── */
+
+.color-pick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--px-panel-dark);
+  border: 3px solid var(--px-border);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+  min-width: 90px;
+}
+
+.color-pick-btn:hover {
+  border-color: var(--px-gold);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.3), inset 0 0 12px rgba(251,191,36,0.1);
+}
+
+.color-pick-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.color-pick-img {
+  width: 48px;
+  height: 48px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(2px 2px 0 rgba(0,0,0,0.4));
+}
+
+.color-pick-dice {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 28px;
+  line-height: 48px;
+  color: var(--px-gold);
+  text-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+}
+
+.color-pick-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
+.color-pick-random {
+  border-color: var(--px-gold);
+  border-style: dashed;
+}
 
 /* ── PROMOTION ── */
 

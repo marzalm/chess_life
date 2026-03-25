@@ -165,8 +165,9 @@ const UIManager = {
     const board = document.getElementById('board');
     board.innerHTML = '';
 
-    const files = ['a','b','c','d','e','f','g','h'];
-    const ranks = [8, 7, 6, 5, 4, 3, 2, 1];
+    const isFlipped = ChessEngine.getPlayerColor() === 'b';
+    const files = isFlipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
+    const ranks = isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
 
     const legalTargets   = this.legalMoves.map(m => m.to);
     const captureTargets = this.legalMoves
@@ -314,6 +315,7 @@ const UIManager = {
       excellent:   '!',
       imprecision: '?',
       blunder:     '?!',
+      book:        '📖',
     };
     const sym = SYMBOLS[evalInfo.key];
     if (!sym) return;
@@ -391,8 +393,9 @@ const UIManager = {
 
   // ── LOGIQUE DE JEU ───────────────────────────────────────────
 
-  newGame() {
+  newGame(playerColor = 'w') {
     ChessEngine.reset();
+    ChessEngine.setPlayerColor(playerColor);
 
     this.selectedSquare   = null;
     this.legalMoves       = [];
@@ -419,7 +422,14 @@ const UIManager = {
     document.getElementById('flow-status').className   = 'flow-status';
 
     this.renderBoard();
-    this.showStatus('À toi de jouer.');
+
+    // Si le joueur est noir, l'IA joue le premier coup
+    if (playerColor === 'b') {
+      this.showStatus('L\'adversaire commence…');
+      this._triggerAIMove();
+    } else {
+      this.showStatus('À toi de jouer.');
+    }
   },
 
   // ── FONCTIONS PRIVÉES ────────────────────────────────────────
@@ -496,6 +506,12 @@ const UIManager = {
       msg = 'Partie nulle.';
     }
 
+    // Son de fin de partie
+    if (typeof SoundManager !== 'undefined') {
+      if (won)              SoundManager.playVictory();
+      else if (!won && resultKey === 'loss') SoundManager.playDefeat();
+    }
+
     FocusSystem.onGameEnd(won);
     CareerManager.syncFocus();
 
@@ -527,8 +543,12 @@ const UIManager = {
    */
   _squareToXY(sq) {
     const files = 'abcdefgh';
-    const col = files.indexOf(sq[0]);
-    const row = 8 - parseInt(sq[1], 10);
+    let col = files.indexOf(sq[0]);
+    let row = 8 - parseInt(sq[1], 10);
+    if (ChessEngine.getPlayerColor() === 'b') {
+      col = 7 - col;
+      row = 7 - row;
+    }
     return { x: col * 72 + 36, y: row * 72 + 36 };
   },
 
@@ -877,8 +897,8 @@ const UIManager = {
       // 1. Obtenir le coup de l'IA
       let move = null;
       const plyCount = ChessEngine.getHistory().length;
-      if (plyCount < 5) {
-        const bookMove = await MaiaEngine.getOpeningMove(fen);
+      if (plyCount < 12) {
+        const bookMove = await MaiaEngine.getOpeningMove(fen, this._opponentElo);
         if (bookMove) move = bookMove;
       }
       if (!move) {
@@ -972,12 +992,21 @@ const UIManager = {
       this.showScreen('dashboard');
     };
 
-    // Dashboard — lancer une partie (bouton grisé tant que Maia n'est pas prêt)
+    // Dashboard — ouvrir le choix de couleur
     document.getElementById('dash-btn-play').onclick = () => {
       if (!MaiaEngine.isReady()) return;
-      this.showScreen('game');
-      this.newGame();
+      document.getElementById('modal-color-choice').showModal();
     };
+
+    // Choix de couleur → lancer la partie
+    const startWithColor = (color) => {
+      document.getElementById('modal-color-choice').close();
+      this.showScreen('game');
+      this.newGame(color);
+    };
+    document.getElementById('pick-white').onclick  = () => startWithColor('w');
+    document.getElementById('pick-black').onclick  = () => startWithColor('b');
+    document.getElementById('pick-random').onclick = () => startWithColor(Math.random() < 0.5 ? 'w' : 'b');
 
     document.getElementById('dash-btn-delete').onclick = () => {
       if (confirm('Effacer la sauvegarde ? Cette action est irréversible.')) {

@@ -340,7 +340,89 @@ const MaiaEngine = (() => {
   // Chaque entrée : [UCI, poids] — le poids reflète la fréquence en parties réelles.
 
   const _BOOK_RAW = {
-    // ── Ply 1 : réponses noires au 1er coup blanc ──
+    // ══════════════════════════════════════════════════════════════
+    // BLANC — Ply 0 : 1er coup blanc (position initiale)
+    // ══════════════════════════════════════════════════════════════
+    '': [['e2e4',3000],['d2d4',2800],['g1f3',1500],['c2c4',1200],['g2g3',400],['b2b3',200],['f2f4',150],['b1c3',100]],
+
+    // ══════════════════════════════════════════════════════════════
+    // BLANC — Ply 2 : 2e coup blanc (après réponse noire)
+    // ══════════════════════════════════════════════════════════════
+
+    // Après 1.e4 …
+    'e4,e5':   [['g1f3',4000],['f1c4',1000],['d2d4',800],['f2f4',600],['b1c3',500]],
+    'e4,c5':   [['g1f3',3000],['b1c3',1200],['c2c3',1000],['d2d4',800],['f1c4',400]],
+    'e4,e6':   [['d2d4',3500],['g1f3',800],['d2d3',300]],
+    'e4,c6':   [['d2d4',3500],['g1f3',600],['b1c3',400]],
+    'e4,d5':   [['e4d5',3000],['e4e5',1500]],
+    'e4,Nf6':  [['e4e5',3000],['b1c3',1500]],
+    'e4,d6':   [['d2d4',3500],['g1f3',1000]],
+    'e4,g6':   [['d2d4',3500],['g1f3',1000]],
+
+    // Après 1.d4 …
+    'd4,d5':   [['c2c4',3000],['g1f3',1500],['c1f4',800],['b1c3',500],['e2e3',400]],
+    'd4,Nf6':  [['c2c4',2800],['g1f3',2000],['c1f4',800],['c1g5',600],['b1c3',400]],
+    'd4,e6':   [['c2c4',2500],['g1f3',1500],['e2e4',800]],
+    'd4,f5':   [['c2c4',2000],['g1f3',1800],['g2g3',1000]],
+    'd4,g6':   [['c2c4',2500],['e2e4',1500],['g1f3',1000]],
+    'd4,c5':   [['d4d5',2000],['e2e3',1200]],
+    'd4,d6':   [['e2e4',2500],['g1f3',1500]],
+
+    // Après 1.Nf3 …
+    'Nf3,d5':  [['d2d4',2500],['c2c4',1500],['g2g3',1000]],
+    'Nf3,Nf6': [['d2d4',2000],['c2c4',1800],['g2g3',1200]],
+    'Nf3,c5':  [['c2c4',2000],['e2e4',1500]],
+    'Nf3,e6':  [['d2d4',2500],['c2c4',800]],
+    'Nf3,g6':  [['d2d4',2500],['c2c4',800]],
+
+    // Après 1.c4 …
+    'c4,e5':   [['b1c3',2500],['g2g3',1500],['g1f3',1200]],
+    'c4,Nf6':  [['b1c3',2500],['d2d4',1500],['g1f3',1000]],
+    'c4,c5':   [['b1c3',2000],['g1f3',1800]],
+    'c4,e6':   [['b1c3',2000],['d2d4',1500]],
+    'c4,g6':   [['d2d4',2500],['b1c3',1500]],
+
+    // ══════════════════════════════════════════════════════════════
+    // BLANC — Ply 4 : 3e coup blanc (lignes principales)
+    // ══════════════════════════════════════════════════════════════
+
+    // 1.e4 e5 2.Nf3 Nc6
+    'e4,e5,Nf3,Nc6':  [['f1b5',2500],['f1c4',2000],['d2d4',1200],['b1c3',800]],
+    // 1.e4 e5 2.Nf3 Nf6
+    'e4,e5,Nf3,Nf6':  [['f3e5',2500],['b1c3',1500],['d2d4',800]],
+    // 1.e4 e5 2.Nf3 d6
+    'e4,e5,Nf3,d6':   [['d2d4',3000],['f1c4',1000]],
+    // 1.e4 c5 2.Nf3 d6
+    'e4,c5,Nf3,d6':   [['d2d4',4000]],
+    // 1.e4 c5 2.Nf3 Nc6
+    'e4,c5,Nf3,Nc6':  [['d2d4',3000],['f1b5',800],['b1c3',500]],
+    // 1.e4 c5 2.Nf3 e6
+    'e4,c5,Nf3,e6':   [['d2d4',3500],['b1c3',500]],
+    // 1.e4 e6 2.d4 d5
+    'e4,e6,d4,d5':    [['b1c3',2000],['b1d2',1800],['e4e5',1500],['e4d5',800]],
+    // 1.e4 c6 2.d4 d5
+    'e4,c6,d4,d5':    [['b1c3',2000],['b1d2',1500],['e4e5',1500],['e4d5',800]],
+
+    // 1.d4 d5 2.c4 e6
+    'd4,d5,c4,e6':    [['b1c3',2500],['g1f3',2000],['c4d5',500]],
+    // 1.d4 d5 2.c4 c6
+    'd4,d5,c4,c6':    [['g1f3',2500],['b1c3',2000],['e2e3',800]],
+    // 1.d4 d5 2.c4 dxc4
+    'd4,d5,c4,dxc4':  [['g1f3',2000],['e2e3',1800],['e2e4',1000]],
+    // 1.d4 Nf6 2.c4 e6
+    'd4,Nf6,c4,e6':   [['b1c3',2500],['g1f3',2500],['g2g3',800]],
+    // 1.d4 Nf6 2.c4 g6
+    'd4,Nf6,c4,g6':   [['b1c3',3000],['g1f3',1500],['g2g3',500]],
+    // 1.d4 Nf6 2.Nf3 d5
+    'd4,Nf6,Nf3,d5':  [['c2c4',2500],['c1f4',1000],['e2e3',800]],
+    // 1.d4 Nf6 2.Nf3 e6
+    'd4,Nf6,Nf3,e6':  [['c2c4',2500],['c1g5',1000],['e2e3',800]],
+    // 1.d4 Nf6 2.Nf3 g6
+    'd4,Nf6,Nf3,g6':  [['c2c4',2000],['g2g3',1500],['c1f4',500]],
+
+    // ══════════════════════════════════════════════════════════════
+    // NOIR — Ply 1 : réponses noires au 1er coup blanc
+    // ══════════════════════════════════════════════════════════════
     'e4':  [['e7e5',2500],['c7c5',2300],['e7e6',1200],['c7c6',900],['d7d5',700],['g8f6',500],['d7d6',400],['g7g6',400]],
     'd4':  [['d7d5',2500],['g8f6',2200],['e7e6',800],['f7f5',400],['g7g6',350],['c7c5',300],['d7d6',250]],
     'Nf3': [['d7d5',2500],['g8f6',2000],['c7c5',800],['e7e6',500],['g7g6',400],['d7d6',300]],
@@ -454,14 +536,16 @@ const MaiaEngine = (() => {
     for (const [sanKey, moves] of Object.entries(_BOOK_RAW)) {
       try {
         const game = new Chess();
-        const sans = sanKey.split(',');
-        let valid = true;
-        for (const san of sans) {
-          if (!game.move(san)) { valid = false; break; }
-        }
-        if (!valid) {
-          console.warn('[Maia] Book: séquence invalide:', sanKey);
-          continue;
+        if (sanKey !== '') {
+          const sans = sanKey.split(',');
+          let valid = true;
+          for (const san of sans) {
+            if (!game.move(san)) { valid = false; break; }
+          }
+          if (!valid) {
+            console.warn('[Maia] Book: séquence invalide:', sanKey);
+            continue;
+          }
         }
         const fenKey = game.fen().split(' ').slice(0, 4).join(' ');
         if (_openingBook[fenKey]) {
@@ -631,8 +715,19 @@ const MaiaEngine = (() => {
      * @param {string} fen
      * @returns {string|null} coup UCI ou null (fallback Maia)
      */
-    getOpeningMove(fen) {
+    getOpeningMove(fen, opponentElo) {
       if (!_openingBook) return null;
+
+      // ── Chance de sortir du livre selon l'ELO ──
+      // Bas ELO = plus de chances de skip (Maia joue un coup bizarre)
+      // 800 → 25% skip, 1200 → 10% skip, 1600+ → 0% skip
+      if (opponentElo != null && opponentElo < 1600) {
+        const skipChance = Math.max(0, 0.25 - (opponentElo - 800) * 0.00019);
+        if (Math.random() < skipChance) {
+          console.log(`[Maia] Book skip (elo=${opponentElo}, chance=${(skipChance*100).toFixed(0)}%)`);
+          return null;
+        }
+      }
 
       const fenKey = fen.split(' ').slice(0, 4).join(' ');
       const moves  = _openingBook[fenKey];
@@ -645,8 +740,14 @@ const MaiaEngine = (() => {
       const filtered = moves.filter(m => m[1] / totalWeight >= 0.01);
       if (filtered.length === 0) return null;
 
-      // Échantillonnage pondéré avec température (0.7 = variété réaliste)
-      const TEMP  = 0.7;
+      // ── Température ajustée selon l'ELO ──
+      // Bas ELO = haute température = plus de coups sous-optimaux
+      // 800 → 1.2, 1200 → 0.9, 1600+ → 0.7
+      let TEMP = 0.7;
+      if (opponentElo != null && opponentElo < 1600) {
+        TEMP = Math.min(1.2, 0.7 + (1600 - opponentElo) * 0.000625);
+      }
+
       const freqs = filtered.map(m => Math.pow(m[1], TEMP));
       const total = freqs.reduce((a, b) => a + b, 0);
       const probs = freqs.map(f => f / total);
@@ -656,11 +757,22 @@ const MaiaEngine = (() => {
       for (let i = 0; i < filtered.length; i++) {
         cumul += probs[i];
         if (r < cumul) {
-          console.log(`[Maia] Opening book: ${filtered[i][0]}`);
+          console.log(`[Maia] Opening book: ${filtered[i][0]} (temp=${TEMP.toFixed(2)})`);
           return filtered[i][0];
         }
       }
       return filtered[filtered.length - 1][0];
+    },
+
+    /**
+     * Vérifie si une position FEN est couverte par le livre d'ouverture.
+     * @param {string} fen
+     * @returns {boolean}
+     */
+    isBookPosition(fen) {
+      if (!_openingBook) return false;
+      const fenKey = fen.split(' ').slice(0, 4).join(' ');
+      return !!_openingBook[fenKey] && _openingBook[fenKey].length > 0;
     },
 
     // ── CALLBACK DE STATUT ──────────────────────────────────────

@@ -274,6 +274,7 @@ body {
 .floating-eval.eval-neutral     { color: #8a7f99; }
 .floating-eval.eval-imprecis    { color: #f97316; }
 .floating-eval.eval-blunder     { color: #e24b4a; font-size: 9px; }
+.floating-eval.eval-book        { color: #c9a87c; font-size: 14px; }
 
 /* ── ZONE NOIRE : tremblement déplacé sur la barre de focus (voir ui.css) ── */
 
@@ -294,8 +295,10 @@ body {
   height: 20px;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  opacity: 0.85;
-  filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.3));
+  opacity: 0.95;
+  filter:
+    drop-shadow(0 0 2px rgba(255,255,255,0.5))
+    drop-shadow(1px 1px 0 rgba(0,0,0,0.4));
   margin-right: -4px;
 }
 

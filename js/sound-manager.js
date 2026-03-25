@@ -206,6 +206,34 @@ const SoundManager = (() => {
       _tone('triangle', 220, 0.12, 0.1, 0.18);
     },
 
+    // ────────────────────────────────────────────────────────────
+    // 12. VICTOIRE — fanfare chiptune triomphante
+    // ────────────────────────────────────────────────────────────
+    playVictory() {
+      if (!_enabled) return;
+      // Fanfare ascendante en Do majeur : C5 E5 G5 → C6 (tenu)
+      _tone('square',   523, 0.12, 0.35);          // C5
+      _tone('square',   659, 0.12, 0.35, 0.10);    // E5
+      _tone('square',   784, 0.12, 0.35, 0.20);    // G5
+      _tone('square',  1047, 0.30, 0.40, 0.32);    // C6 tenu
+      // Accord final enrichi
+      _tone('triangle', 523, 0.35, 0.20, 0.32);    // C5 soutien
+      _tone('triangle', 659, 0.30, 0.15, 0.32);    // E5 soutien
+      _tone('square',  1319, 0.20, 0.20, 0.50);    // E6 brillant
+      _noise(0.04, 0.15);                            // petit éclat
+    },
+
+    // ────────────────────────────────────────────────────────────
+    // 13. DÉFAITE — son sombre descendant
+    // ────────────────────────────────────────────────────────────
+    playDefeat() {
+      if (!_enabled) return;
+      _tone('triangle', 392, 0.20, 0.30);          // G4
+      _tone('triangle', 330, 0.20, 0.25, 0.15);    // E4
+      _tone('triangle', 262, 0.25, 0.20, 0.30);    // C4
+      _tone('sawtooth', 196, 0.40, 0.15, 0.45);    // G3 sombre
+    },
+
   };
 
 })();
