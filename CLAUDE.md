@@ -131,11 +131,18 @@ Les modules suivants seront **supprimés** lors de la Phase A (nettoyage du pivo
 
 À partir d'ici, le projet pivote de la direction « jeu type Pokémon avec clubs » vers la direction « simulation de carrière type Football Manager ». Les phases 5 à 8 précédentes sont **annulées** et remplacées par A→H ci-dessous.
 
-**Phase A — Nettoyage pivot**
-Supprimer les fichiers de l'ancienne direction Pokémon (`world-*`, `game-controller.js`, `club-data.js`, `progression-manager.js`, `css/world.css`), nettoyer [index.html](index.html) et [ui-manager.js](js/ui-manager.js) des références aux écrans `screen-world` et `screen-dashboard`.
+**Phase A ✅ — Nettoyage pivot** (terminée le 2026-04-10, commit `1bf903b`)
+Suppression des fichiers de l'ancienne direction Pokémon, nettoyage d'[index.html](index.html), [ui-manager.js](js/ui-manager.js), [career-manager.js](js/career-manager.js), [focus-system.js](js/focus-system.js), [dialog-system.js](js/dialog-system.js) et [save-manager.js](js/save-manager.js). Passage du code et de l'UI à l'anglais. Stub bootstrap qui crée un joueur par défaut et affiche l'écran de jeu pour permettre le test.
 
 **Phase B — Personnage et calendrier**
 `character-creator.js` (layers pixel art : visage, cheveux, yeux, peau, tenue, plus nom, nationalité, genre), `calendar-system.js` (temps en semaines/jours/années, file d'événements, bouton « Continuer » qui avance jusqu'au prochain événement), écran home avec le calendrier annuel visible et les événements affichés. `ui-career.js` est créé ici.
+
+- **B.1 ✅** — `save-manager.js` clé `chess_life_career_v2` (Phase A)
+- **B.2 ✅ (2026-04-10)** — `career-manager.js` réécrit en schéma nesté domain-driven inspiré de ZenGM. Sub-namespaces `player`, `calendar`, `focus`, `finances`, `history`. Migration défensive depuis l'ancien schéma plat. JSDoc typedefs pour `CareerState`. Debug global `window.cl`. Tous les callers migrés. Voir [CHANGELOG.md](CHANGELOG.md).
+- **B.3 ✅ (2026-04-10)** — `calendar-system.js` : moteur de temps grégorien (zéro `Date` natif), file d'événements triée par date, machine à états (`idle` / `event_prompt` / `in_tournament` / `in_training`) avec une fonction de transition par phase à la ZenGM, boucle `continue()` jour par jour avec cap de sécurité 365 jours. Pure logique, zéro DOM. Debug shortcut `window.cl.calendar`. Suite de tests Node.js dans [tests/calendar-system.test.js](tests/calendar-system.test.js) (50 tests, tous verts). Voir [CHANGELOG.md](CHANGELOG.md).
+- **B.4 ✅ (2026-04-10)** — `ui-career.js` + écran home avec player header (avatar placeholder, nom, nationalité, Elo, money), grille calendrier mensuelle ISO 8601 (jour aujourd'hui en doré, points rouges sur jours d'événements), bouton Continue qui appelle `CalendarSystem.continue()`, liste des prochains événements, modal `#modal-event-prompt` pour le flux event_prompt, bouton "Back to home" sur l'écran de jeu, retour automatique au home après une partie. Helpers `getDayOfWeek` (Zeller's congruence), `getDayOfWeekName`, `getDaysInMonth` ajoutés à `calendar-system.js`. 53 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
+- **B.5 ✅ (2026-04-10)** — `character-creator.js` + `avatar-data.js`. Écran de création de personnage avec preview d'avatar placeholder (CSS shapes : cheveux + visage + yeux + tenue), 6 cyclers de layers (skin/face/eyes/hair/hairColor/outfit), bouton randomize, champs name/country (40 nations FIDE)/gender (M/F/X), validation du nom obligatoire. Le bootstrap appelle `CharacterCreator.show()` au premier lancement (plus de stub silencieux). Le home header rend désormais le vrai avatar via le même `AvatarData` que le creator. Voir [CHANGELOG.md](CHANGELOG.md).
+- **B.6 ✅ (2026-04-10)** — Polish final de Phase B : Focus stat dans le header du home, drapeau du pays au lieu du code ISO, day-of-week dans la ligne "Today" du calendrier, lock 200 ms du bouton Continue + status "No events scheduled — skipped X days", hooks SoundManager sur Continue / Event prompt / Back to home / Reset / Start career / Randomize / validation error. Phase B complète. Voir [CHANGELOG.md](CHANGELOG.md).
 
 **Phase C — Tournois Tier 1 et 2**
 `tournament-system.js` et `tournament-data.js`. Un tournoi = une série de rounds contre des adversaires Maia générés (nom, Elo, nationalité, portrait). Appariements de type suisse simplifié. Gains/pertes Elo FIDE. Prize money versé au solde. Seulement les Tiers 1 et 2 (amateur local + national amateur). Les parties se jouent sur l'échiquier existant avec le système Focus.
@@ -174,6 +181,26 @@ Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pag
 **Tout le code, les commentaires, les identifiants et les textes UI sont en anglais.** Un système multilingue sera ajouté plus tard (Phase H) avec le français comme première langue alternative. Jusque-là, seuls CLAUDE.md et LEARNINGS.md restent en français (documents de conception).
 
 Exemples : variables `playerName` pas `nomJoueur`, fichier `tournament-data.js` pas `donnees-tournois.js`, bouton UI "Continue" pas "Continuer".
+
+## Refactors différés (à reprendre quand le moment sera venu)
+
+Ces décisions ont été prises avec la note "à revoir plus tard". Quand
+tu travailles sur le module concerné, vérifie si l'un de ces points
+est mûr pour être traité.
+
+- **Calendar dispatcher style ZenGM strict** *(décidé en B.3, 2026-04-10)*
+  Notre `calendar-system.js` expose des fonctions de transition nommées
+  directes (`enterTournament()`, `exitTournament()`, `enterTraining()`,
+  …). ZenGM passe par un dispatcher central `newPhase(phaseId, …)` avec
+  une lookup table et 13 fichiers `newPhase*.ts` séparés. On garde
+  notre style direct tant qu'on a 4 phases synchrones et zéro hook
+  cross-cutting. **Refactor déclencheurs** : (a) on dépasse 6-7 phases,
+  ou (b) on a besoin d'un `finalize()` qui s'exécute après chaque
+  transition (par exemple : émettre un mail dans l'inbox à chaque
+  changement de phase, ou logguer dans l'historique). Quand l'un des
+  deux arrive, basculer sur le pattern ZenGM avec
+  `CalendarSystem.PHASE = { IDLE: 0, … }` et un `setPhase(phaseId)`
+  central.
 
 ## Comment tu dois travailler avec moi
 

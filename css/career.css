@@ -1,0 +1,672 @@
+/* ════════════════════════════════════════════════════════════════
+   CHESS LIFE — CAREER.CSS — Home screen, calendar grid, event prompt
+   Variables come from ui.css (--px-*).
+   ════════════════════════════════════════════════════════════════ */
+
+#screen-home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px;
+  min-height: 100vh;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--px-text);
+}
+
+/* Tailwind's `.hidden { display: none }` already handles visibility
+   toggling via JS. No custom .visible class needed. */
+
+/* ── PLAYER HEADER ──────────────────────────────────────────── */
+
+.career-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  max-width: 720px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 14px 18px;
+  margin-bottom: 18px;
+}
+
+.career-avatar {
+  width: 56px;
+  height: 56px;
+  background: var(--px-wood-light);
+  border: 2px solid var(--px-border-hi);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--px-text);
+  flex-shrink: 0;
+  box-shadow: inset -1px -1px 0 rgba(0,0,0,0.4);
+}
+
+.career-header-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.career-player-name {
+  font-size: 14px;
+  color: var(--px-accent);
+  letter-spacing: 0.5px;
+}
+
+.career-player-meta {
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
+.career-header-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: right;
+  font-size: 9px;
+}
+
+.career-stat-label {
+  color: var(--px-text-dim);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.career-stat-value {
+  color: var(--px-gold);
+  font-size: 12px;
+}
+
+/* ── CALENDAR PANEL ─────────────────────────────────────────── */
+
+.career-calendar {
+  width: 100%;
+  max-width: 720px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.career-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.career-calendar-title {
+  font-size: 12px;
+  color: var(--px-accent);
+  letter-spacing: 1px;
+}
+
+.career-calendar-today {
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
+.career-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.career-cal-dow {
+  font-size: 7px;
+  color: var(--px-text-dim);
+  text-transform: uppercase;
+  text-align: center;
+  padding: 4px 0;
+  letter-spacing: 1px;
+}
+
+.career-cal-day {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--px-panel-dark);
+  border: 1px solid rgba(107, 90, 138, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--px-text);
+}
+
+.career-cal-day.empty {
+  background: transparent;
+  border-color: transparent;
+}
+
+.career-cal-day.today {
+  background: var(--px-accent);
+  color: var(--px-bg);
+  border-color: var(--px-gold);
+  box-shadow: 0 0 0 1px var(--px-gold);
+  font-weight: bold;
+}
+
+.career-cal-day.has-event::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  background: var(--px-red);
+  border-radius: 50%;
+}
+
+.career-cal-day.today.has-event::after {
+  background: var(--px-bg);
+}
+
+/* ── CONTINUE BUTTON ───────────────────────────────────────── */
+
+.career-continue-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.career-continue-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  background: var(--px-green);
+  color: var(--px-bg);
+  border: 3px solid #2d8a4f;
+  box-shadow:
+    inset  1px  1px 0 rgba(255,255,255,0.3),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 14px 32px;
+  cursor: pointer;
+  transition: transform 60ms ease;
+}
+
+.career-continue-btn:hover {
+  transform: translate(-1px, -1px);
+}
+
+.career-continue-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset  1px  1px 0 rgba(255,255,255,0.3),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    1px 1px 0 rgba(0,0,0,0.4);
+}
+
+.career-continue-btn:disabled {
+  background: var(--px-text-dim);
+  border-color: #555;
+  cursor: not-allowed;
+}
+
+.career-continue-status {
+  text-align: center;
+  font-size: 8px;
+  color: var(--px-text-dim);
+  margin-top: 8px;
+  min-height: 12px;
+  letter-spacing: 0.5px;
+}
+
+.career-continue-status.warn {
+  color: var(--px-accent);
+}
+
+/* ── UPCOMING EVENTS ─────────────────────────────────────── */
+
+.career-upcoming {
+  width: 100%;
+  max-width: 720px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 14px 18px;
+  margin-bottom: 18px;
+}
+
+.career-upcoming-title {
+  font-size: 9px;
+  color: var(--px-accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+.career-upcoming-empty {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  font-style: italic;
+}
+
+.career-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.career-upcoming-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--px-panel-dark);
+  border-left: 3px solid var(--px-accent);
+  font-size: 8px;
+}
+
+.career-upcoming-date {
+  color: var(--px-text-dim);
+  font-size: 7px;
+}
+
+.career-upcoming-label {
+  color: var(--px-text);
+}
+
+/* ── DEV / TEST ROW ───────────────────────────────────────── */
+
+.career-dev-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.career-dev-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel-dark);
+  color: var(--px-text-dim);
+  border: 2px solid var(--px-border);
+  padding: 8px 14px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.career-dev-btn:hover {
+  background: var(--px-panel);
+  color: var(--px-text);
+}
+
+/* ── EVENT PROMPT MODAL ───────────────────────────────────── */
+
+#modal-event-prompt .modal-box {
+  background: var(--px-panel);
+  border: 3px solid var(--px-accent);
+  color: var(--px-text);
+  font-family: 'Press Start 2P', monospace;
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.5);
+}
+
+#event-prompt-title {
+  font-size: 11px;
+  color: var(--px-accent);
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+#event-prompt-date {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  margin-bottom: 14px;
+}
+
+#event-prompt-body {
+  font-size: 9px;
+  color: var(--px-text);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+#btn-event-dismiss {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  background: var(--px-accent);
+  color: var(--px-bg);
+  border: 2px solid var(--px-gold);
+  padding: 10px 20px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   CHARACTER CREATOR SCREEN
+   ════════════════════════════════════════════════════════════════ */
+
+#screen-character {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  min-height: 100vh;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--px-text);
+}
+
+.cc-card {
+  width: 100%;
+  max-width: 720px;
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.5);
+  padding: 24px 28px;
+}
+
+.cc-title {
+  font-size: 14px;
+  color: var(--px-accent);
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.cc-subtitle {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  margin-bottom: 22px;
+}
+
+.cc-body {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 22px;
+  align-items: flex-start;
+}
+
+/* ── Avatar preview column ── */
+
+.cc-avatar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.cc-avatar-preview {
+  width: 96px;
+  height: 128px;
+  background: var(--px-panel-dark);
+  border: 2px solid var(--px-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  position: relative;
+  image-rendering: pixelated;
+}
+
+.cc-avatar-hair {
+  width: 56px;
+}
+
+.cc-avatar-face {
+  width: 56px;
+  height: 56px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: -2px;
+}
+
+.cc-avatar-eye {
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(0,0,0,0.6);
+}
+
+.cc-avatar-outfit {
+  width: 64px;
+  height: 26px;
+  margin-top: 2px;
+}
+
+.cc-randomize {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel-dark);
+  color: var(--px-text-dim);
+  border: 2px solid var(--px-border);
+  padding: 6px 10px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+.cc-randomize:hover {
+  background: var(--px-panel);
+  color: var(--px-accent);
+  border-color: var(--px-accent);
+}
+
+/* ── Layer cyclers column ── */
+
+.cc-layers-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cc-layer-row {
+  display: grid;
+  grid-template-columns: 100px 28px 1fr 28px;
+  align-items: center;
+  gap: 6px;
+  background: var(--px-panel-dark);
+  border: 1px solid rgba(107, 90, 138, 0.4);
+  padding: 6px 10px;
+}
+
+.cc-layer-name {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.cc-layer-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.cc-layer-btn:hover {
+  background: var(--px-accent);
+  color: var(--px-bg);
+  border-color: var(--px-accent);
+}
+
+.cc-layer-label {
+  font-size: 8px;
+  color: var(--px-accent);
+  text-align: center;
+}
+
+/* ── Identity row ── */
+
+.cc-identity {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
+  margin-bottom: 18px;
+}
+
+.cc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cc-field-label {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.cc-input {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  background: var(--px-panel-dark);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 8px 10px;
+  outline: none;
+}
+
+.cc-input:focus {
+  border-color: var(--px-accent);
+}
+
+.cc-gender-row {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.cc-gender-row .cc-field-label {
+  margin-right: 6px;
+}
+
+.cc-radio {
+  font-size: 9px;
+  color: var(--px-text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cc-radio input {
+  accent-color: var(--px-accent);
+}
+
+/* ── Error and start ── */
+
+.cc-error {
+  font-size: 8px;
+  color: var(--px-red);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.cc-error.hidden {
+  display: none;
+}
+
+.cc-start {
+  display: block;
+  margin: 0 auto;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  background: var(--px-green);
+  color: var(--px-bg);
+  border: 3px solid #2d8a4f;
+  padding: 14px 28px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  box-shadow:
+    inset  1px  1px 0 rgba(255,255,255,0.3),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+}
+
+.cc-start:hover {
+  transform: translate(-1px, -1px);
+}
+
+.cc-start:active {
+  transform: translate(2px, 2px);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HOME HEADER AVATAR (rendered via avatar-data presets)
+   ════════════════════════════════════════════════════════════════ */
+
+.career-avatar {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+
+.career-avatar-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding-top: 4px;
+  image-rendering: pixelated;
+}
+
+.career-avatar-mini-hair   { width: 28px; }
+.career-avatar-mini-face   {
+  width: 28px;
+  height: 24px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: -1px;
+}
+.career-avatar-mini-eye    { width: 4px;  height: 4px; border: 1px solid rgba(0,0,0,0.6); }
+.career-avatar-mini-outfit { width: 32px; height: 12px; margin-top: 1px; }
+
+/* ── BACK TO HOME (game screen) ───────────────────────────── */
+
+#btn-back-home {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 6px 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+#btn-back-home:hover {
+  background: var(--px-panel-dark);
+  color: var(--px-accent);
+}

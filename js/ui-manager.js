@@ -350,8 +350,8 @@ const UIManager = {
       this._opponentId   = null;
     }
 
-    const stats = CareerManager.getPublicStats();
-    document.getElementById('player-elo').textContent    = stats ? stats.elo : 800;
+    const player = CareerManager.hasCharacter() ? CareerManager.player.get() : null;
+    document.getElementById('player-elo').textContent    = player ? player.elo : 800;
     document.getElementById('opponent-name').textContent = this._opponentName;
     document.getElementById('opponent-elo').textContent  = this._opponentElo;
     document.getElementById('moves-list').innerHTML = '';
@@ -444,10 +444,10 @@ const UIManager = {
     }
 
     FocusSystem.onGameEnd(won);
-    CareerManager.syncFocus();
+    CareerManager.focus.sync();
 
     if (this._opponentName) {
-      CareerManager.recordGame({
+      CareerManager.history.recordGame({
         opponentName: this._opponentName,
         opponentElo:  this._opponentElo,
         result:       resultKey,
@@ -662,7 +662,7 @@ const UIManager = {
 
     // Elo-based trap probability
     const elo = typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()
-      ? CareerManager.getPlayer().elo : 800;
+      ? CareerManager.player.get().elo : 800;
     const trapChance = elo < 1200 ? 0.6 : elo < 1600 ? 0.5 : 0.35;
 
     const numPieces = palier >= 3 ? 2 : 3;
@@ -814,8 +814,8 @@ const UIManager = {
 
     try {
       const fen       = ChessEngine.getFEN();
-      const stats     = CareerManager.getPublicStats();
-      const playerElo = stats ? stats.elo : 800;
+      const player    = CareerManager.hasCharacter() ? CareerManager.player.get() : null;
+      const playerElo = player ? player.elo : 800;
 
       let move = null;
       const plyCount = ChessEngine.getHistory().length;
@@ -971,7 +971,7 @@ const UIManager = {
     if (btnCloseReview) {
       btnCloseReview.onclick = () => {
         ReviewManager.stopReview();
-        CareerManager.syncFocus();
+        CareerManager.focus.sync();
       };
     }
   },
@@ -987,16 +987,30 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   MaiaEngine.init(); // async — runs in background
   CareerManager.init();
+  CalendarSystem.init();
   UIManager.init();
+  UICareer.init();
+  CharacterCreator.init();
 
-  // Phase A stub: if no character, create a default one silently so
-  // the game screen is immediately usable for testing. Phase B will
-  // replace this with a proper character-creator flow.
+  // When a test game ends, automatically return to the home screen.
+  UIManager.onGameEnd = () => {
+    setTimeout(() => {
+      UICareer.showScreen('home');
+      UICareer.home.render();
+    }, 1500);
+  };
+
+  // Initial routing: if no character, show the creator. Otherwise
+  // jump straight to the home screen.
   if (!CareerManager.hasCharacter()) {
-    CareerManager.createPlayer('Player', 'Norway');
+    CharacterCreator.show(() => {
+      UICareer.showScreen('home');
+      UICareer.home.render();
+    });
+  } else {
+    UICareer.showScreen('home');
+    UICareer.home.render();
   }
-
-  UIManager.showGameScreen();
 
   // Background music (ON by default)
   const bgMusic  = document.getElementById('bg-music');

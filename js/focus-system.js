@@ -196,7 +196,7 @@ const FocusSystem = {
 
   _getPlayerElo() {
     if (typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()) {
-      return CareerManager.getPlayer().elo;
+      return CareerManager.player.get().elo;
     }
     return 800;
   },
@@ -623,8 +623,8 @@ const FocusSystem = {
   resetForGame() {
     // Lire les valeurs persistées pour le current, mais remettre max à 100
     if (typeof CareerManager !== 'undefined' && CareerManager.hasCharacter()) {
-      const player = CareerManager.getPlayer();
-      const savedCurrent = player.focusCurrent;
+      const focusState = CareerManager.focus.get();
+      const savedCurrent = focusState.current;
       this.max = 100; // Reset max chaque partie (pénalités SF sont intra-partie)
       const recovery = savedCurrent + (100 - savedCurrent) * 0.4;
       this.current = Math.min(100, Math.round(recovery));

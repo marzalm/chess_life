@@ -25,6 +25,7 @@
 
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/ui.css">
+  <link rel="stylesheet" href="css/career.css">
 </head>
 <body>
 
@@ -35,9 +36,152 @@
   <button id="btn-sfx" class="music-toggle music-on" title="Sound FX ON/OFF">SFX ON</button>
 
   <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: CHARACTER CREATION
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-character" class="hidden">
+    <div class="cc-card">
+      <h1 class="cc-title">Create your character</h1>
+      <p class="cc-subtitle">You can't change these details later.</p>
+
+      <div class="cc-body">
+
+        <!-- Avatar preview + randomize -->
+        <div class="cc-avatar-col">
+          <div id="cc-avatar-preview" class="cc-avatar-preview"></div>
+          <button id="cc-randomize" class="cc-randomize">↻ Randomize</button>
+        </div>
+
+        <!-- Layer cyclers -->
+        <div class="cc-layers-col">
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Skin</span>
+            <button class="cc-layer-btn" data-layer="skinTone" data-dir="-1">◀</button>
+            <span id="cc-label-skinTone" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="skinTone" data-dir="1">▶</button>
+          </div>
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Face</span>
+            <button class="cc-layer-btn" data-layer="faceShape" data-dir="-1">◀</button>
+            <span id="cc-label-faceShape" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="faceShape" data-dir="1">▶</button>
+          </div>
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Eyes</span>
+            <button class="cc-layer-btn" data-layer="eyeColor" data-dir="-1">◀</button>
+            <span id="cc-label-eyeColor" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="eyeColor" data-dir="1">▶</button>
+          </div>
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Hair</span>
+            <button class="cc-layer-btn" data-layer="hairStyle" data-dir="-1">◀</button>
+            <span id="cc-label-hairStyle" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="hairStyle" data-dir="1">▶</button>
+          </div>
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Hair color</span>
+            <button class="cc-layer-btn" data-layer="hairColor" data-dir="-1">◀</button>
+            <span id="cc-label-hairColor" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="hairColor" data-dir="1">▶</button>
+          </div>
+          <div class="cc-layer-row">
+            <span class="cc-layer-name">Outfit</span>
+            <button class="cc-layer-btn" data-layer="outfit" data-dir="-1">◀</button>
+            <span id="cc-label-outfit" class="cc-layer-label">—</span>
+            <button class="cc-layer-btn" data-layer="outfit" data-dir="1">▶</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Identity -->
+      <div class="cc-identity">
+        <label class="cc-field">
+          <span class="cc-field-label">Name</span>
+          <input id="cc-name" type="text" maxlength="24" autocomplete="off"
+                 class="cc-input" placeholder="Magnus, Hou, Fabiano…" />
+        </label>
+
+        <label class="cc-field">
+          <span class="cc-field-label">Country</span>
+          <select id="cc-country" class="cc-input"></select>
+        </label>
+
+        <div id="cc-gender-row" class="cc-field cc-gender-row">
+          <span class="cc-field-label">Gender</span>
+          <label class="cc-radio"><input type="radio" name="cc-gender" value="M"> M</label>
+          <label class="cc-radio"><input type="radio" name="cc-gender" value="F"> F</label>
+          <label class="cc-radio"><input type="radio" name="cc-gender" value="X"> X</label>
+        </div>
+      </div>
+
+      <p id="cc-error" class="cc-error hidden">—</p>
+
+      <button id="cc-start" class="cc-start">Start career ▶</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: HOME (calendar + continue button)
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-home" class="hidden">
+
+    <!-- Player header -->
+    <div class="career-header">
+      <div id="career-avatar" class="career-avatar">?</div>
+      <div class="career-header-info">
+        <div id="career-player-name" class="career-player-name">Player</div>
+        <div id="career-player-meta" class="career-player-meta">—</div>
+      </div>
+      <div class="career-header-stats">
+        <div>
+          <div class="career-stat-label">Elo</div>
+          <div id="career-elo" class="career-stat-value">800</div>
+        </div>
+        <div>
+          <div class="career-stat-label">Focus</div>
+          <div id="career-focus" class="career-stat-value">100%</div>
+        </div>
+        <div>
+          <div class="career-stat-label">Money</div>
+          <div id="career-money" class="career-stat-value">$ 500</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar panel -->
+    <div class="career-calendar">
+      <div class="career-calendar-header">
+        <div id="career-calendar-title" class="career-calendar-title">Month YYYY</div>
+        <div id="career-calendar-today" class="career-calendar-today">Today: —</div>
+      </div>
+      <div id="career-calendar-grid" class="career-calendar-grid"></div>
+      <div class="career-continue-row">
+        <button id="btn-continue" class="career-continue-btn">Continue ▶</button>
+      </div>
+      <div id="career-continue-status" class="career-continue-status"></div>
+    </div>
+
+    <!-- Upcoming events -->
+    <div class="career-upcoming">
+      <div class="career-upcoming-title">Upcoming events</div>
+      <div id="career-upcoming-list" class="career-upcoming-list"></div>
+    </div>
+
+    <!-- Dev / test row (Phase B placeholder, removed in Phase C) -->
+    <div class="career-dev-row">
+      <button id="btn-play-test-game" class="career-dev-btn">▶ Play test game</button>
+      <button id="btn-reset-career" class="career-dev-btn">↺ Reset career</button>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
        SCREEN: GAME
   ══════════════════════════════════════════════════════════════ -->
-  <div id="screen-game">
+  <div id="screen-game" class="hidden">
+
+    <button id="btn-back-home" type="button">← Back to home</button>
+
 
     <div id="app">
 
@@ -97,6 +241,20 @@
 
     </div>
   </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL: EVENT PROMPT (calendar event reached)
+  ══════════════════════════════════════════════════════════════ -->
+  <dialog id="modal-event-prompt" class="modal">
+    <div class="modal-box w-full max-w-md text-center">
+      <h3 id="event-prompt-title">Event</h3>
+      <p id="event-prompt-date">—</p>
+      <p id="event-prompt-body">—</p>
+      <div class="modal-action justify-center">
+        <button id="btn-event-dismiss">OK</button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- ══════════════════════════════════════════════════════════════
        MODAL: PROMOTION
@@ -183,11 +341,15 @@
   <script src="js/sound-manager.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
+  <script src="js/calendar-system.js"></script>
+  <script src="js/avatar-data.js"></script>
   <script src="js/dialog-system.js"></script>
   <script src="js/chess-engine.js"></script>
   <script src="js/maia-engine.js"></script>
   <script src="js/review-manager.js"></script>
   <script src="js/ui-manager.js"></script>
+  <script src="js/ui-career.js"></script>
+  <script src="js/character-creator.js"></script>
 
 </body>
 </html>
