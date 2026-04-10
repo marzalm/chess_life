@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="fr" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chess Life</title>
 
-  <!-- Cross-Origin Isolation pour SharedArrayBuffer (Stockfish WASM) -->
+  <!-- Cross-Origin Isolation for SharedArrayBuffer (Stockfish WASM) -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/coi-serviceworker.js').then(() => {
@@ -18,7 +18,7 @@
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/daisyui.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
-  <!-- Police pixel art -->
+  <!-- Pixel art font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -28,119 +28,33 @@
 </head>
 <body>
 
-  <!-- Musique de fond -->
+  <!-- Background music -->
   <audio id="bg-music" loop preload="auto"
          src="assets/Sounds/Music/cfl_turningpages-subtle-pixel-glow-462740.mp3"></audio>
-  <button id="btn-music" class="music-toggle music-on" title="Musique ON/OFF">♫ ON</button>
-  <button id="btn-sfx" class="music-toggle music-on" title="Sons ON/OFF">SFX ON</button>
+  <button id="btn-music" class="music-toggle music-on" title="Music ON/OFF">♫ ON</button>
+  <button id="btn-sfx" class="music-toggle music-on" title="Sound FX ON/OFF">SFX ON</button>
 
   <!-- ══════════════════════════════════════════════════════════════
-       ÉCRAN : DASHBOARD
+       SCREEN: GAME
   ══════════════════════════════════════════════════════════════ -->
-  <div id="screen-dashboard" class="hidden">
-    <div class="dashboard-wrap">
-
-      <!-- En-tête : nom + Elo -->
-      <div class="dash-header">
-        <div>
-          <h1 id="dash-player-name" class="dash-name">Joueur</h1>
-          <p id="dash-player-meta" class="dash-meta"></p>
-        </div>
-        <div class="dash-elo-box">
-          <span class="dash-elo-label">ELO</span>
-          <span id="dash-elo" class="dash-elo-value">800</span>
-        </div>
-      </div>
-
-      <!-- Stats principales (DaisyUI stats) -->
-      <div class="stats shadow-md w-full dash-stats">
-        <div class="stat">
-          <div class="stat-title">Solde</div>
-          <div class="stat-value text-warning" id="dash-solde">500 €</div>
-          <div class="stat-desc">Argent disponible</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Focus Max</div>
-          <div class="stat-value text-info" id="dash-focus-max">100 %</div>
-          <div class="stat-desc">Concentration maximale</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Parties</div>
-          <div class="stat-value" id="dash-games-count">0</div>
-          <div class="stat-desc" id="dash-record">—</div>
-        </div>
-      </div>
-
-      <!-- Compétences -->
-      <div class="dash-skills">
-        <h2 class="dash-section-title">Compétences</h2>
-
-        <div class="skill-row">
-          <span class="skill-name">Ouvertures</span>
-          <progress class="progress progress-primary skill-bar"
-                    id="skill-ouvertures" value="10" max="100"></progress>
-          <span class="skill-val" id="skill-ouvertures-val">10</span>
-        </div>
-
-        <div class="skill-row">
-          <span class="skill-name">Finales</span>
-          <progress class="progress progress-secondary skill-bar"
-                    id="skill-endgame" value="10" max="100"></progress>
-          <span class="skill-val" id="skill-endgame-val">10</span>
-        </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="dash-actions">
-        <button id="dash-btn-play" class="btn btn-primary btn-lg w-full" disabled>
-          ♟ Jouer une partie
-        </button>
-        <div id="maia-loading-bar" class="hidden">
-          <progress id="maia-loading-progress" class="progress progress-info w-full h-2"
-                    value="0" max="100"></progress>
-          <p id="maia-loading-text" class="text-xs text-center opacity-50 mt-1">
-            Chargement de l'IA…
-          </p>
-        </div>
-        <button id="dash-btn-delete" class="btn btn-ghost btn-xs text-error mt-2">
-          Effacer la sauvegarde et recommencer
-        </button>
-      </div>
-
-      <!-- Historique récent -->
-      <div id="dash-history" class="dash-history">
-        <h2 class="dash-section-title">Parties récentes</h2>
-        <div id="dash-history-list" class="dash-history-list"></div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════════════════════
-       ÉCRAN : JEU
-  ══════════════════════════════════════════════════════════════ -->
-  <div id="screen-game" class="hidden">
-
-    <button id="btn-back-dashboard" class="btn btn-ghost btn-sm back-btn">
-      ← Retour
-    </button>
+  <div id="screen-game">
 
     <div id="app">
 
-      <!-- Sidebar gauche -->
+      <!-- Left sidebar -->
       <div id="sidebar">
         <div id="player-info">
-          <div class="label">Ton Elo</div>
+          <div class="label">Your Elo</div>
           <div id="player-elo">800</div>
         </div>
         <div id="opponent-info">
-          <div class="label">Adversaire</div>
+          <div class="label">Opponent</div>
           <div id="opponent-name">—</div>
           <div id="opponent-elo">—</div>
         </div>
         <div id="focus-section">
           <div class="label">Focus</div>
-          <!-- Flow State auto-activé (plus de bouton) -->
+          <!-- Flow State auto-activated (no button) -->
           <button id="btn-flow-state" class="flow-btn hidden" aria-hidden="true"></button>
           <div id="focus-bar-wrap">
             <div id="focus-bar"></div>
@@ -150,20 +64,23 @@
           <div id="flow-status" class="flow-status"></div>
         </div>
         <div id="stockfish-section">
-          <div class="label">Analyse Stockfish</div>
+          <div class="label">Stockfish analysis</div>
           <div class="tooltip w-full" id="tooltip-sf3" data-tip="">
-            <button class="sf-btn w-full" id="btn-sf3">N3 — Meilleur coup (-22%)</button>
+            <button class="sf-btn w-full" id="btn-sf3">N3 — Best move (-22%)</button>
           </div>
-          <div id="sf-feedback">Active Stockfish pour analyser la position.</div>
-          <button class="sf-btn w-full" id="btn-takeback" style="margin-top:6px;">Reprise de coup (-30%)</button>
+          <div id="sf-feedback">Activate Stockfish to analyze the position.</div>
+          <button class="sf-btn w-full" id="btn-takeback" style="margin-top:6px;">Takeback (-30%)</button>
+          <button class="sf-btn w-full intuition-btn hidden" id="btn-intuition" style="margin-top:6px;">
+            ✦ Intuition
+          </button>
         </div>
         <div id="game-controls">
-          <button id="btn-new-game">Nouvelle partie</button>
-          <div id="game-status">Lance une partie pour commencer.</div>
+          <button id="btn-new-game">New game</button>
+          <div id="game-status">Start a game to begin.</div>
         </div>
       </div>
 
-      <!-- Échiquier centre -->
+      <!-- Center board -->
       <div id="board-section">
         <div id="captured-black"></div>
         <div id="board-container">
@@ -172,9 +89,9 @@
         <div id="captured-white"></div>
       </div>
 
-      <!-- Historique droite -->
+      <!-- Right move history -->
       <div id="move-history">
-        <div class="label">Historique</div>
+        <div class="label">History</div>
         <div id="moves-list"></div>
       </div>
 
@@ -182,175 +99,91 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
-       MODAL : CRÉATION DU PERSONNAGE (DaisyUI dialog)
-       Affiché automatiquement au premier lancement.
-  ══════════════════════════════════════════════════════════════ -->
-  <dialog id="modal-create-player" class="modal">
-    <div class="modal-box w-full max-w-md" style="color:#e0d8c8;">
-      <h2 style="font-family:'Press Start 2P',monospace;font-size:14px;color:#e8c98a;margin-bottom:4px;">Crée ton personnage</h2>
-      <p style="font-family:'Press Start 2P',monospace;font-size:7px;opacity:0.6;margin-bottom:20px;">Tu ne pourras pas changer ces infos plus tard.</p>
-
-      <div class="form-control mb-4">
-        <label class="label">
-          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Ton prénom</span>
-        </label>
-        <input type="text" id="input-nom"
-               class="input input-bordered w-full"
-               placeholder="Magnus, Fabiano…"
-               maxlength="24" autocomplete="off" />
-      </div>
-
-      <div class="form-control mb-4">
-        <label class="label">
-          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Nationalité</span>
-        </label>
-        <select id="input-nationalite" class="select select-bordered w-full">
-          <option value="" disabled selected>Choisis ton pays…</option>
-          <option value="Afrique du Sud">🇿🇦 Afrique du Sud</option>
-          <option value="Allemagne">🇩🇪 Allemagne</option>
-          <option value="Angleterre">🏴󠁧󠁢󠁥󠁮󠁧󠁿 Angleterre</option>
-          <option value="Argentine">🇦🇷 Argentine</option>
-          <option value="Arménie">🇦🇲 Arménie</option>
-          <option value="Australie">🇦🇺 Australie</option>
-          <option value="Azerbaïdjan">🇦🇿 Azerbaïdjan</option>
-          <option value="Belgique">🇧🇪 Belgique</option>
-          <option value="Biélorussie">🇧🇾 Biélorussie</option>
-          <option value="Brésil">🇧🇷 Brésil</option>
-          <option value="Bulgarie">🇧🇬 Bulgarie</option>
-          <option value="Canada">🇨🇦 Canada</option>
-          <option value="Chine">🇨🇳 Chine</option>
-          <option value="Corée du Sud">🇰🇷 Corée du Sud</option>
-          <option value="Croatie">🇭🇷 Croatie</option>
-          <option value="Cuba">🇨🇺 Cuba</option>
-          <option value="Danemark">🇩🇰 Danemark</option>
-          <option value="Égypte">🇪🇬 Égypte</option>
-          <option value="Espagne">🇪🇸 Espagne</option>
-          <option value="États-Unis">🇺🇸 États-Unis</option>
-          <option value="France">🇫🇷 France</option>
-          <option value="Géorgie">🇬🇪 Géorgie</option>
-          <option value="Grèce">🇬🇷 Grèce</option>
-          <option value="Hongrie">🇭🇺 Hongrie</option>
-          <option value="Inde">🇮🇳 Inde</option>
-          <option value="Indonésie">🇮🇩 Indonésie</option>
-          <option value="Iran">🇮🇷 Iran</option>
-          <option value="Israël">🇮🇱 Israël</option>
-          <option value="Italie">🇮🇹 Italie</option>
-          <option value="Japon">🇯🇵 Japon</option>
-          <option value="Kazakhstan">🇰🇿 Kazakhstan</option>
-          <option value="Maroc">🇲🇦 Maroc</option>
-          <option value="Mexique">🇲🇽 Mexique</option>
-          <option value="Norvège">🇳🇴 Norvège</option>
-          <option value="Ouzbékistan">🇺🇿 Ouzbékistan</option>
-          <option value="Pays-Bas">🇳🇱 Pays-Bas</option>
-          <option value="Pérou">🇵🇪 Pérou</option>
-          <option value="Philippines">🇵🇭 Philippines</option>
-          <option value="Pologne">🇵🇱 Pologne</option>
-          <option value="Portugal">🇵🇹 Portugal</option>
-          <option value="République tchèque">🇨🇿 République tchèque</option>
-          <option value="Roumanie">🇷🇴 Roumanie</option>
-          <option value="Russie">🇷🇺 Russie</option>
-          <option value="Serbie">🇷🇸 Serbie</option>
-          <option value="Suède">🇸🇪 Suède</option>
-          <option value="Suisse">🇨🇭 Suisse</option>
-          <option value="Tunisie">🇹🇳 Tunisie</option>
-          <option value="Turquie">🇹🇷 Turquie</option>
-          <option value="Ukraine">🇺🇦 Ukraine</option>
-          <option value="Venezuela">🇻🇪 Venezuela</option>
-          <option value="Vietnam">🇻🇳 Vietnam</option>
-        </select>
-      </div>
-
-      <div class="form-control mb-6">
-        <label class="label">
-          <span class="label-text" style="font-family:'Press Start 2P',monospace;font-size:8px;color:#9b8aba;">Style de jeu</span>
-        </label>
-        <select id="input-style" class="select select-bordered w-full">
-          <option value="Positionnel">Positionnel — solidité et structure</option>
-          <option value="Tactique">Tactique — complications et sacrifices</option>
-          <option value="Universel">Universel — adaptable à toute position</option>
-        </select>
-      </div>
-
-      <div class="modal-action">
-        <button id="btn-create-player" class="btn btn-primary w-full"
-                style="font-family:'Press Start 2P',monospace;font-size:10px;border-radius:0;box-shadow:3px 3px 0 rgba(0,0,0,0.4);">
-          Commencer la carrière →
-        </button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ══════════════════════════════════════════════════════════════
-       MODAL : PROMOTION (DaisyUI dialog)
+       MODAL: PROMOTION
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="promotion-modal" class="modal">
     <div class="modal-box bg-base-200 border border-primary/30 text-center">
-      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;">Promotion — choisissez la pièce</h3>
+      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;">Promotion — pick a piece</h3>
       <div id="promotion-choices" class="flex gap-4 justify-center"></div>
     </div>
   </dialog>
 
   <!-- ══════════════════════════════════════════════════════════════
-       MODAL : CHOIX DE COULEUR (DaisyUI dialog)
+       MODAL: COLOR CHOICE
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="modal-color-choice" class="modal">
     <div class="modal-box bg-base-200 border border-primary/30 text-center" style="max-width:360px;">
       <h3 class="font-bold mb-5" style="font-family:'Press Start 2P',monospace;font-size:11px;color:#e8c98a;">
-        Choisis ton camp
+        Pick your side
       </h3>
       <div class="flex justify-center gap-4 mb-2">
-        <button id="pick-white" class="color-pick-btn" title="Jouer les Blancs">
-          <img src="assets/pieces/wK.png" alt="Blancs" class="color-pick-img">
-          <span class="color-pick-label">Blancs</span>
+        <button id="pick-white" class="color-pick-btn" title="Play White">
+          <img src="assets/pieces/wK.png" alt="White" class="color-pick-img">
+          <span class="color-pick-label">White</span>
         </button>
-        <button id="pick-random" class="color-pick-btn color-pick-random" title="Au hasard">
+        <button id="pick-random" class="color-pick-btn color-pick-random" title="Random">
           <span class="color-pick-dice">?</span>
-          <span class="color-pick-label">Hasard</span>
+          <span class="color-pick-label">Random</span>
         </button>
-        <button id="pick-black" class="color-pick-btn" title="Jouer les Noirs">
-          <img src="assets/pieces/bK.png" alt="Noirs" class="color-pick-img">
-          <span class="color-pick-label">Noirs</span>
+        <button id="pick-black" class="color-pick-btn" title="Play Black">
+          <img src="assets/pieces/bK.png" alt="Black" class="color-pick-img">
+          <span class="color-pick-label">Black</span>
         </button>
       </div>
     </div>
   </dialog>
 
   <!-- ══════════════════════════════════════════════════════════════
-       MODAL : REVUE POST-PARTIE (DaisyUI dialog)
+       MODAL: POST-GAME REVIEW
   ══════════════════════════════════════════════════════════════ -->
   <dialog id="modal-review" class="modal">
     <div class="modal-box w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-base-200">
-      <h2 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:13px;">Revue post-partie</h2>
+      <h2 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:13px;">Post-game review</h2>
 
-      <!-- Barre de progression pendant l'analyse -->
+      <!-- Progress bar during analysis -->
       <div id="review-progress-wrap">
         <progress id="review-progress" class="progress progress-primary w-full"
                   value="0" max="100"></progress>
         <p id="review-progress-text" class="text-sm text-center mt-2 opacity-60">
-          Analyse en cours…
+          Analyzing…
         </p>
       </div>
 
-      <!-- Résultats (masqués pendant l'analyse) -->
+      <!-- Results (hidden during analysis) -->
       <div id="review-results" class="hidden">
         <div id="review-chart" class="mb-6 max-h-64 overflow-y-auto"></div>
-        <h3 class="font-bold mb-3" style="font-family:'Press Start 2P',monospace;font-size:10px;">Moments clés</h3>
+        <h3 class="font-bold mb-3" style="font-family:'Press Start 2P',monospace;font-size:10px;">Key moments</h3>
         <div id="review-moments" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4"></div>
       </div>
 
       <div class="modal-action">
-        <button id="btn-close-review" class="btn">Fermer</button>
+        <button id="btn-close-review" class="btn">Close</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ── SCRIPTS (ordre de dépendance) ── -->
+  <!-- Loading overlay for Maia model -->
+  <div id="maia-loading-bar" class="hidden"
+       style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+              background:#1a1a2e;border:2px solid #e8c98a;padding:12px 20px;
+              z-index:1000;min-width:280px;font-family:'Press Start 2P',monospace;">
+    <progress id="maia-loading-progress" class="progress progress-info w-full h-2"
+              value="0" max="100"></progress>
+    <p id="maia-loading-text" class="text-xs text-center opacity-70 mt-2"
+       style="color:#e0d8c8;">Loading AI…</p>
+  </div>
+
+  <!-- Fade transition overlay -->
+  <div id="screen-fade" class="screen-fade"></div>
+
+  <!-- ── SCRIPTS (dependency order) ── -->
   <script src="lib/chess.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
   <script src="js/save-manager.js"></script>
   <script src="js/sound-manager.js"></script>
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
+  <script src="js/dialog-system.js"></script>
   <script src="js/chess-engine.js"></script>
   <script src="js/maia-engine.js"></script>
   <script src="js/review-manager.js"></script>

@@ -48,11 +48,11 @@ const FocusSystem = {
   // ── ZONES ────────────────────────────────────────────────────
 
   ZONES: [
-    { min: 80, max: 100, color: '#1d9e75', label: 'Concentration maximale' },
-    { min: 50, max: 80,  color: '#378add', label: 'Focus stable'           },
-    { min: 20, max: 50,  color: '#ef9f27', label: 'Concentration fragile'  },
-    { min: 5,  max: 20,  color: '#e24b4a', label: 'Limite critique'        },
-    { min: 0,  max: 5,   color: '#2c2c2a', label: 'Épuisé'                 },
+    { min: 80, max: 100, color: '#1d9e75', label: 'Peak concentration'    },
+    { min: 50, max: 80,  color: '#378add', label: 'Focus steady'          },
+    { min: 20, max: 50,  color: '#ef9f27', label: 'Concentration fading'  },
+    { min: 5,  max: 20,  color: '#e24b4a', label: 'Critical'              },
+    { min: 0,  max: 5,   color: '#2c2c2a', label: 'Exhausted'             },
   ],
 
   /** @returns {object} zone correspondant au Focus actuel (basé sur % du max) */
@@ -93,6 +93,56 @@ const FocusSystem = {
     const freeN = this.FLOW_CONFIG[this.flowPalier].freeN;
     if (level <= freeN) return 0;
     return this.getEffectiveSFCost(level);
+  },
+
+  // ── INTUITION (SURBRILLANCES FLOW) ──────────────────────────
+
+  /**
+   * Coût Focus de l'Intuition par palier Flow.
+   * Palier 0-1 : non disponible.
+   * Palier 2 : -15%, Palier 3 : -10%, Palier 4 (MAX) : gratuit.
+   */
+  INTUITION_COST: { 2: 15, 3: 10, 4: 0 },
+
+  /**
+   * Vérifie si l'Intuition est disponible (Flow II+).
+   * @returns {boolean}
+   */
+  canUseIntuition() {
+    if (this.flowPalier < 2) return false;
+    const cost = this.INTUITION_COST[this.flowPalier] || 0;
+    return this.current >= cost;
+  },
+
+  /**
+   * Active l'Intuition : dépense du Focus, retourne le coût.
+   * @returns {number|false} coût payé, ou false si indisponible
+   */
+  activateIntuition() {
+    if (this.flowPalier < 2) return false;
+    const cost = this.INTUITION_COST[this.flowPalier] || 0;
+    if (this.current < cost) return false;
+
+    if (cost > 0) {
+      this.apply(-cost, 'Intuition');
+    } else {
+      this._log(0, 'Intuition (gratuit en Flow MAX)');
+    }
+
+    this.render();
+    return cost;
+  },
+
+  /**
+   * Appelé quand le joueur choisit une pièce après Intuition.
+   * Si c'est un leurre et qu'on n'est pas en Flow MAX → sort du Flow.
+   * @param {boolean} correct — true si le joueur a choisi la bonne pièce
+   */
+  onIntuitionResult(correct) {
+    if (!correct && this.flowPalier > 0 && this.flowPalier < 4) {
+      this._exitFlow();
+      this._log(0, 'Mauvais choix d\'Intuition — sortie du Flow !');
+    }
   },
 
   // ── FLOW STATE CONFIG ────────────────────────────────────────
@@ -200,12 +250,12 @@ const FocusSystem = {
    */
   _classifyMove(abs, threshold) {
     // abs <= 12 : "Meilleur" — tolérance pour la variance Stockfish entre prefetch et post-eval
-    if (abs <= 12)                   return { key: 'best',        label: 'Meilleur !',  cls: 'eval-best' };
-    if (abs <= threshold * 0.5)      return { key: 'excellent',   label: 'Excellent !',  cls: 'eval-excellent' };
-    if (abs < threshold)             return { key: 'good',        label: 'Bon',          cls: 'eval-good' };
-    if (abs < 100)                   return { key: 'neutral',     label: 'Neutre',       cls: 'eval-neutral' };
-    if (abs < 200)                   return { key: 'imprecision', label: 'Imprécis',     cls: 'eval-imprecis' };
-    return                                    { key: 'blunder',    label: 'Erreur !',     cls: 'eval-blunder' };
+    if (abs <= 12)                   return { key: 'best',        label: 'Best!',       cls: 'eval-best' };
+    if (abs <= threshold * 0.5)      return { key: 'excellent',   label: 'Excellent!',  cls: 'eval-excellent' };
+    if (abs < threshold)             return { key: 'good',        label: 'Good',        cls: 'eval-good' };
+    if (abs < 100)                   return { key: 'neutral',     label: 'Neutral',     cls: 'eval-neutral' };
+    if (abs < 200)                   return { key: 'imprecision', label: 'Inaccurate',  cls: 'eval-imprecis' };
+    return                                    { key: 'blunder',    label: 'Blunder!',    cls: 'eval-blunder' };
   },
 
   // ── MODIFICATEURS ──────────────────────────────────────────
@@ -246,7 +296,7 @@ const FocusSystem = {
   // ── MODIFICATION DU FOCUS ──────────────────────────────────
 
   /**
-   * Modifie le Focus courant avec application des modificateurs (Confiance, Flow, etc.).
+   * Modifie le Focus courant avec application des modificateurs (Flow, puzzle bonuses, etc.).
    * Clamp entre 0 et effectiveMax.
    * @param {number} delta  - variation brute (+/-)
    * @param {string} reason - texte affiché dans le log console
@@ -592,28 +642,7 @@ const FocusSystem = {
     // Nettoyer les modificateurs temporaires
     this.removeModifier('flow-gain-mult');
 
-    // Mettre à jour le modificateur de Confiance
-    this._updateConfianceModifier();
-
     this.render();
-  },
-
-  // ── CONFIANCE (STAT CACHÉE) ──────────────────────────────────
-
-  _updateConfianceModifier() {
-    this.removeModifier('confiance-gain');
-    this.removeModifier('confiance-loss');
-
-    if (typeof CareerManager === 'undefined' || !CareerManager.hasCharacter()) return;
-
-    const confiance = CareerManager.getPlayer().confiance;
-
-    if (confiance > 70) {
-      this.addModifier({ id: 'confiance-gain', type: 'focus-gain-mult', value: 1.4 });
-    } else if (confiance < 30) {
-      this.addModifier({ id: 'confiance-gain', type: 'focus-gain-mult', value: 0.7 });
-      this.addModifier({ id: 'confiance-loss', type: 'focus-loss-mult', value: 1.2 });
-    }
   },
 
   // ── INFO FLOW STATE (API PUBLIQUE) ──────────────────────────
@@ -696,7 +725,7 @@ const FocusSystem = {
         flowStatus.innerHTML = '<span class="badge badge-warning badge-lg flow-badge-active">' +
           `Flow ${names[this.flowPalier]}${progressText}</span>`;
       } else if (this.consecutiveGoodMoves >= 1) {
-        flowStatus.textContent = `Momentum : ${Math.floor(this.consecutiveGoodMoves)}/3`;
+        flowStatus.textContent = `Momentum: ${Math.floor(this.consecutiveGoodMoves)}/3`;
         flowStatus.className   = 'flow-status flow-status-passive';
       } else {
         flowStatus.textContent = '';
@@ -721,16 +750,16 @@ const FocusSystem = {
         btn.disabled = insufficient;
 
         if (isFree) {
-          btn.textContent = `N3 — Meilleur coup (GRATUIT ⚡)`;
+          btn.textContent = `N3 — Best move (FREE ⚡)`;
         } else {
-          btn.textContent = `N3 — Meilleur coup (-${baseCost}%)`;
+          btn.textContent = `N3 — Best move (-${baseCost}%)`;
         }
 
         if (tooltip) {
           if (insufficient) {
-            tooltip.dataset.tip = `Focus insuffisant (${flowCost}% requis)`;
+            tooltip.dataset.tip = `Not enough Focus (${flowCost}% required)`;
           } else if (isFree) {
-            tooltip.dataset.tip = 'Gratuit en Flow State — mais sort du Flow !';
+            tooltip.dataset.tip = 'Free in Flow State — but exits Flow!';
           } else {
             tooltip.dataset.tip = '';
           }
@@ -738,11 +767,27 @@ const FocusSystem = {
       }
     }
 
-    // ── Bouton Reprise de coup ──
+    // ── Takeback button ──
     const takebackBtn = document.getElementById('btn-takeback');
     if (takebackBtn) {
       takebackBtn.disabled = !this.canTakeback();
-      takebackBtn.textContent = `Reprise de coup (-${this.TAKEBACK_COST}%)`;
+      takebackBtn.textContent = `Takeback (-${this.TAKEBACK_COST}%)`;
+    }
+
+    // ── Bouton Intuition (Flow II+) ──
+    const intuBtn = document.getElementById('btn-intuition');
+    if (intuBtn) {
+      const canUse = this.canUseIntuition();
+      intuBtn.classList.toggle('hidden', this.flowPalier < 2);
+      intuBtn.disabled = !canUse;
+      if (this.flowPalier >= 2) {
+        const cost = this.INTUITION_COST[this.flowPalier] || 0;
+        if (cost > 0) {
+          intuBtn.textContent = `✦ Intuition (-${cost}%)`;
+        } else {
+          intuBtn.textContent = '✦ Intuition (FREE ⚡)';
+        }
+      }
     }
 
     // ── Tremblement continu zone noire (0-5%) sur la barre de focus ──

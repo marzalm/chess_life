@@ -1,33 +1,44 @@
 // ui-manager.js
-// Rendu DOM et gestion des interactions utilisateur.
-// Communique avec ChessEngine, FocusSystem et CareerManager via leurs API publiques.
+// DOM rendering and user interaction for the game screen.
+// Communicates with ChessEngine, FocusSystem, CareerManager, MaiaEngine
+// and ReviewManager through their public APIs only.
+//
+// Phase A: game screen only. Dashboard/world/club code has been removed.
+// Phase B will add career screens via a separate ui-career.js module.
 
 const UIManager = {
 
-  // ── ÉTAT INTERNE ─────────────────────────────────────────────
+  // ── INTERNAL STATE ───────────────────────────────────────────
 
   selectedSquare:   null,
   legalMoves:       [],
   lastMove:         null,
   pendingPromotion: null,
 
-  // ── ÉTAT IA ────────────────────────────────────────────────
-  _aiThinking:    false,
-  _opponentName:  null,
-  _opponentElo:   null,
+  // AI state
+  _aiThinking:   false,
+  _opponentName: null,
+  _opponentElo:  null,
+  _opponentId:   null,
 
-  // ── ÉTAT STOCKFISH VISUEL ──────────────────────────────────
-  sfArrow:          null,    // N3 : { from, to } de la flèche
+  // Stockfish visuals
+  sfArrow: null, // N3 arrow { from, to }
 
-  // ── ÉTAT FLOW REWARDS ────────────────────────────────────────
-  flowThreats:        [],    // Flow I : [{from, to}] flèches rouges menaces
-  flowHighlights:     [],    // Flow II/III : cases des pièces surbrillance
-  flowCorrectSquare:  null,  // case source du meilleur coup (pour vérifier le choix)
+  // Flow rewards
+  flowThreats:         [],
+  flowHighlights:      [],
+  flowCorrectSquare:   null,
   _flowRewardsLoading: false,
+  _intuitionActive:    false,
 
-  // ── ÉVALUATION DES COUPS ────────────────────────────────────
-  _moveEvals:        {},     // { ply: evalInfo } — évaluation de chaque coup joueur
-  _moveEvalSquares:  {},     // { ply: square } — case destination pour le texte flottant
+  // Move evaluations (from FocusSystem callback)
+  _moveEvals:       {},
+  _moveEvalSquares: {},
+
+  // Callback fired when a game ends. External code (career flow) can
+  // subscribe by setting UIManager.onGameEnd = (result) => {...}.
+  // result: 'win' | 'loss' | 'draw'
+  onGameEnd: null,
 
   PIECES: {
     wK: 'assets/pieces/wK.png', wQ: 'assets/pieces/wQ.png',
@@ -38,131 +49,54 @@ const UIManager = {
     bN: 'assets/pieces/bN.png', bP: 'assets/pieces/bP.png',
   },
 
-  // Unicode fallback pour promotion modal et pièces capturées
   PIECES_UNICODE: {
     wK: '♔', wQ: '♕', wR: '♖', wB: '♗', wN: '♘', wP: '♙',
     bK: '♚', bQ: '♛', bR: '♜', bB: '♝', bN: '♞', bP: '♟',
   },
 
-  _OPPONENT_NAMES: [
-    'Viktor Antonov', 'Svetlana Karpova', 'Rajesh Anand',
-    'Magnus Lindström', 'Isabella Ferrari', 'Chen Wei',
-    'Alexandre Dubois', 'Yuki Tanaka', 'David Fischer',
-    'Olga Petrova', 'Hans Müller', 'Carmen López',
-    'Nikolai Sokolov', 'Priya Sharma', 'Thomas Eriksen',
-    'Fatima Al-Rashid', 'Luca Moretti', 'Anya Volkova',
-    'James Morrison', 'Sofia Papadopoulos', 'Boris Ivanov',
-    'Mei Lin Zhang', 'André Philidor', 'Eva Steinitz',
-    'Sergei Botvinnik', 'Amara Diallo', 'Kim Hyun-woo',
-    'Maria Capablanca', 'Emil Lasker', 'Aisha Patel',
-  ],
+  // ── INIT ─────────────────────────────────────────────────────
 
-  // ── INITIALISATION ───────────────────────────────────────────
-
+  /**
+   * Bind UI buttons and register callbacks. Does NOT show any screen
+   * nor start a game. The caller is responsible for that.
+   */
   init() {
     this._bindButtons();
     this.renderBoard();
     FocusSystem.render();
 
-    // Callback pour recevoir les évaluations de coups du FocusSystem
     FocusSystem.setMoveEvalCallback((evalInfo) => this._onMoveEvaluated(evalInfo));
-
-    if (!CareerManager.hasCharacter()) {
-      this._openCharacterCreation();
-    } else {
-      this.showScreen('dashboard');
-    }
   },
 
-  // ── GESTION DES ÉCRANS ───────────────────────────────────────
+  // ── PUBLIC GAME CONTROL ──────────────────────────────────────
 
-  showScreen(name) {
-    document.getElementById('screen-dashboard').classList.toggle('hidden', name !== 'dashboard');
-    document.getElementById('screen-game').classList.toggle('hidden', name !== 'game');
-
-    if (name === 'dashboard') {
-      this.renderDashboard();
-    }
+  /**
+   * Set the AI opponent for the next game.
+   * @param {{ name: string, elo: number, id?: string }} opponent
+   */
+  setOpponent(opponent) {
+    this._opponentName = opponent.name;
+    this._opponentElo  = opponent.elo;
+    this._opponentId   = opponent.id || null;
   },
 
-  // ── DASHBOARD ────────────────────────────────────────────────
-
-  renderDashboard() {
-    const stats = CareerManager.getPublicStats();
-
-    document.getElementById('dash-player-name').textContent = stats.nom;
-    document.getElementById('dash-player-meta').textContent =
-      `${stats.nationalite} · ${stats.styleDeJeu} · Semaine ${stats.semaine}`;
-    document.getElementById('dash-elo').textContent       = stats.elo;
-    document.getElementById('dash-solde').textContent     = stats.solde + ' €';
-    document.getElementById('dash-focus-max').textContent = stats.focusMax + ' %';
-
-    const parties = stats.historiqueParties;
-    document.getElementById('dash-games-count').textContent = parties.length;
-
-    if (parties.length > 0) {
-      const wins   = parties.filter(p => p.result === 'win').length;
-      const draws  = parties.filter(p => p.result === 'draw').length;
-      const losses = parties.length - wins - draws;
-      document.getElementById('dash-record').textContent =
-        `${wins}V · ${draws}N · ${losses}D`;
-    } else {
-      document.getElementById('dash-record').textContent = 'Aucune partie jouée';
-    }
-
-    this._setSkillBar('ouvertures', stats.ouvertures);
-    this._setSkillBar('endgame',    stats.endgame);
-    this._renderRecentHistory(parties);
-    this._updateMaiaUI(MaiaEngine.getStatus(), MaiaEngine.getProgress());
+  /** Show the game screen. */
+  showGameScreen() {
+    const el = document.getElementById('screen-game');
+    if (el) el.classList.remove('hidden');
   },
 
-  _setSkillBar(key, value) {
-    const bar = document.getElementById('skill-' + key);
-    const val = document.getElementById('skill-' + key + '-val');
-    if (bar) bar.value = value;
-    if (val) val.textContent = value;
+  /** Hide the game screen. */
+  hideGameScreen() {
+    const el = document.getElementById('screen-game');
+    if (el) el.classList.add('hidden');
   },
 
-  _renderRecentHistory(parties) {
-    const list = document.getElementById('dash-history-list');
-    list.innerHTML = '';
-
-    const recent = [...parties].reverse().slice(0, 5);
-
-    if (recent.length === 0) {
-      list.innerHTML = '<p class="history-empty">Aucune partie jouée pour l\'instant.</p>';
-      return;
-    }
-
-    const resultLabel = { win: 'Victoire', draw: 'Nulle', loss: 'Défaite' };
-    const resultClass = { win: 'h-result-win', draw: 'h-result-draw', loss: 'h-result-loss' };
-
-    recent.forEach(p => {
-      const row = document.createElement('div');
-      row.className = 'history-entry';
-
-      const deltaSign  = p.delta >= 0 ? '+' : '';
-      const deltaClass = p.delta >= 0 ? 'h-delta-pos' : 'h-delta-neg';
-
-      row.innerHTML = `
-        <span class="h-opponent">${p.opponentName} (${p.opponentElo})</span>
-        <span class="${resultClass[p.result]}">${resultLabel[p.result]}</span>
-        <span class="${deltaClass}">${deltaSign}${p.delta} Elo</span>
-      `;
-      list.appendChild(row);
-    });
-  },
-
-  // ── CRÉATION DU PERSONNAGE ────────────────────────────────────
-
-  _openCharacterCreation() {
-    document.getElementById('modal-create-player').showModal();
-  },
-
-  // ── RENDU DE L'ÉCHIQUIER ─────────────────────────────────────
+  // ── BOARD RENDERING ──────────────────────────────────────────
 
   renderBoard() {
     const board = document.getElementById('board');
+    if (!board) return;
     board.innerHTML = '';
 
     const isFlipped = ChessEngine.getPlayerColor() === 'b';
@@ -192,7 +126,7 @@ const UIManager = {
         if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
         if (captureTargets.includes(square))                                   el.classList.add('legal-capture');
         if (inCheck && square === kingSquare)                                  el.classList.add('in-check');
-        if (this.flowHighlights.includes(square))                             el.classList.add('flow-highlight');
+        if (this.flowHighlights.includes(square))                              el.classList.add('flow-highlight');
 
         if (fi === 0) {
           const r = document.createElement('span');
@@ -221,17 +155,12 @@ const UIManager = {
       });
     });
 
-    // Flèche SVG N3
     this._renderArrow();
-
-    // Flèches rouges de menaces (Flow I+)
     this._renderThreatArrows();
-
-    // Pièces capturées
     this._renderCapturedPieces();
   },
 
-  // ── SURBRILLANCES ────────────────────────────────────────────
+  // ── HIGHLIGHTS ───────────────────────────────────────────────
 
   highlightSquares(squares) {
     squares.forEach(sq => {
@@ -246,28 +175,22 @@ const UIManager = {
     });
   },
 
-  // ── STATUT ET HISTORIQUE ─────────────────────────────────────
+  // ── STATUS AND HISTORY ───────────────────────────────────────
 
   showStatus(msg) {
     const el = document.getElementById('game-status');
-    if (el) el.textContent = msg;
+    if (el) {
+      el.style.whiteSpace = 'pre-line';
+      el.textContent = msg;
+    }
   },
 
   updateMoveHistory() {
     const history     = ChessEngine.getHistory();
     const list        = document.getElementById('moves-list');
+    if (!list) return;
     const playerColor = ChessEngine.getPlayerColor();
     list.innerHTML = '';
-
-    // Annotations chess-standard pour chaque classification
-    const EVAL_SYMBOLS = {
-      best:        { sym: '!!', cls: 'eval-best' },
-      excellent:   { sym: '!',  cls: 'eval-excellent' },
-      good:        { sym: '',   cls: 'eval-good' },
-      neutral:     { sym: '',   cls: '' },
-      imprecision: { sym: '?!', cls: 'eval-imprecis' },
-      blunder:     { sym: '??', cls: 'eval-blunder' },
-    };
 
     for (let i = 0; i < history.length; i += 2) {
       const row = document.createElement('div');
@@ -285,8 +208,7 @@ const UIManager = {
       black.className   = 'move-black';
       black.textContent = history[i + 1] || '';
 
-      // Annotation d'évaluation pour les coups du joueur
-      // history[i] = ply i+1 (blancs), history[i+1] = ply i+2 (noirs)
+      // Evaluation annotation for the player's moves
       if (playerColor === 'w') {
         this._appendEvalAnnotation(white, i + 1);
       }
@@ -303,9 +225,6 @@ const UIManager = {
     list.scrollTop = list.scrollHeight;
   },
 
-  /**
-   * Ajoute un badge d'annotation (!! ! ?! ??) après le texte d'un coup dans l'historique.
-   */
   _appendEvalAnnotation(moveSpan, ply) {
     const evalInfo = this._moveEvals[ply];
     if (!evalInfo || evalInfo.key === 'neutral' || evalInfo.key === 'good') return;
@@ -326,7 +245,7 @@ const UIManager = {
     moveSpan.appendChild(badge);
   },
 
-  // ── GESTION DES CLICS ────────────────────────────────────────
+  // ── CLICK HANDLING ───────────────────────────────────────────
 
   onSquareClick(square) {
     if (ChessEngine.isGameOver()) return;
@@ -336,17 +255,28 @@ const UIManager = {
     const piece = ChessEngine.getPiece(square);
     const turn  = ChessEngine.getTurn();
 
-    // ── Clic sur une de ses propres pièces → sélection ──
+    // Click on own piece → selection
     if (piece && piece.color === turn) {
+      // Intuition: check if the player clicked a highlighted piece
+      if (this._intuitionActive && this.flowHighlights.length > 0) {
+        if (this.flowHighlights.includes(square)) {
+          const correct = (square === this.flowCorrectSquare);
+          FocusSystem.onIntuitionResult(correct);
+          if (!correct) this._flashCorrectSquare();
+        }
+        this._intuitionActive = false;
+        this.flowHighlights   = [];
+        this.flowCorrectSquare = null;
+      }
+
       this.selectedSquare = square;
       this.legalMoves     = ChessEngine.getLegalMoves(square);
-      // Lancer l'évaluation anticipée pendant que le joueur choisit sa case
       ChessEngine.prefetchEval();
       this.renderBoard();
       return;
     }
 
-    // ── Clic sur une case destination ──
+    // Click on a destination square
     if (this.selectedSquare) {
       const move = this.legalMoves.find(m => m.to === square);
       if (move) {
@@ -391,8 +321,13 @@ const UIManager = {
     modal.showModal();
   },
 
-  // ── LOGIQUE DE JEU ───────────────────────────────────────────
+  // ── GAME LIFECYCLE ───────────────────────────────────────────
 
+  /**
+   * Start a new game. An opponent must have been set previously via
+   * setOpponent(). If no opponent is set, a default placeholder is used.
+   * @param {'w'|'b'} playerColor
+   */
   newGame(playerColor = 'w') {
     ChessEngine.reset();
     ChessEngine.setPlayerColor(playerColor);
@@ -408,31 +343,32 @@ const UIManager = {
 
     FocusSystem.resetForGame();
 
-    // Générer l'adversaire IA
-    this._generateOpponent();
+    // Fallback placeholder opponent (Phase A — Phase C will always set one)
+    if (!this._opponentName) {
+      this._opponentName = 'Test Opponent';
+      this._opponentElo  = 800;
+      this._opponentId   = null;
+    }
 
     const stats = CareerManager.getPublicStats();
-    document.getElementById('player-elo').textContent   = stats.elo;
+    document.getElementById('player-elo').textContent    = stats ? stats.elo : 800;
     document.getElementById('opponent-name').textContent = this._opponentName;
     document.getElementById('opponent-elo').textContent  = this._opponentElo;
     document.getElementById('moves-list').innerHTML = '';
     document.getElementById('sf-feedback').textContent =
-      'Active Stockfish pour analyser la position.';
+      'Activate Stockfish to analyze the position.';
     document.getElementById('flow-status').textContent = '';
     document.getElementById('flow-status').className   = 'flow-status';
 
     this.renderBoard();
 
-    // Si le joueur est noir, l'IA joue le premier coup
     if (playerColor === 'b') {
-      this.showStatus('L\'adversaire commence…');
+      this.showStatus('Opponent begins…');
       this._triggerAIMove();
     } else {
-      this.showStatus('À toi de jouer.');
+      this.showStatus('Your move.');
     }
   },
-
-  // ── FONCTIONS PRIVÉES ────────────────────────────────────────
 
   _executeMove(move) {
     if (move.flags.includes('p')) {
@@ -444,21 +380,18 @@ const UIManager = {
   },
 
   /**
-   * Applique un coup via ChessEngine.makeMove (synchrone).
-   * L'évaluation Focus se fait en arrière-plan sans bloquer l'UI.
-   * Si c'est le tour de l'IA après ce coup, déclenche _triggerAIMove().
+   * Apply a move via ChessEngine.makeMove (synchronous).
+   * Focus evaluation runs in the background without blocking the UI.
    */
   _applyMove(from, to, promo = 'q') {
     const move = ChessEngine.makeMove(from, to, promo);
     if (!move) return;
 
-    // Son de déplacement (ou capture)
     if (typeof SoundManager !== 'undefined') {
       if (move.captured) SoundManager.playCapture();
       else               SoundManager.playMove();
     }
 
-    // Tracer la case destination pour le texte flottant d'évaluation
     const ply = ChessEngine.getHistory().length;
     this._moveEvalSquares[ply] = to;
 
@@ -472,18 +405,17 @@ const UIManager = {
 
     if (this._checkGameEnd()) return;
 
-    // Tour de l'IA
     if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) {
       this._triggerAIMove();
     } else {
-      this.showStatus('À toi de jouer.');
+      this.showStatus('Your move.');
     }
   },
 
   /**
-   * Vérifie si la partie est terminée. Si oui, enregistre le résultat,
-   * met à jour le Focus et lance la revue post-partie.
-   * @returns {boolean} true si la partie est terminée
+   * Check if the game is over. If so, record the result, sync Focus,
+   * fire the onGameEnd callback, and launch the post-game review.
+   * @returns {boolean} true if the game is over
    */
   _checkGameEnd() {
     if (!ChessEngine.isGameOver()) return false;
@@ -498,24 +430,22 @@ const UIManager = {
       const loserColor = ChessEngine.getTurn();
       won       = loserColor !== playerColor;
       resultKey = won ? 'win' : 'loss';
-      const winner = loserColor === 'w' ? 'Noirs' : 'Blancs';
-      msg = `Échec et mat — ${winner} gagnent !`;
+      const winner = loserColor === 'w' ? 'Black' : 'White';
+      msg = `Checkmate — ${winner} wins!`;
     } else if (result === 'stalemate') {
-      msg = 'Pat — partie nulle.';
+      msg = 'Stalemate — draw.';
     } else if (result === 'draw') {
-      msg = 'Partie nulle.';
+      msg = 'Draw.';
     }
 
-    // Son de fin de partie
     if (typeof SoundManager !== 'undefined') {
-      if (won)              SoundManager.playVictory();
-      else if (!won && resultKey === 'loss') SoundManager.playDefeat();
+      if (won)                                SoundManager.playVictory();
+      else if (!won && resultKey === 'loss')  SoundManager.playDefeat();
     }
 
     FocusSystem.onGameEnd(won);
     CareerManager.syncFocus();
 
-    // Enregistrer la partie dans le palmarès
     if (this._opponentName) {
       CareerManager.recordGame({
         opponentName: this._opponentName,
@@ -527,7 +457,16 @@ const UIManager = {
 
     this.showStatus(msg);
 
-    // Lancer la revue post-partie automatiquement
+    // Fire external callback (career flow will subscribe here)
+    if (typeof this.onGameEnd === 'function') {
+      try {
+        this.onGameEnd(resultKey);
+      } catch (e) {
+        console.error('[UIManager] onGameEnd callback error:', e);
+      }
+    }
+
+    // Automatic post-game review
     const history = ChessEngine.getHistory();
     if (history.length >= 4) {
       ReviewManager.startReview(history);
@@ -536,10 +475,11 @@ const UIManager = {
     return true;
   },
 
-  // ── STOCKFISH VISUEL ─────────────────────────────────────────
+  // ── STOCKFISH VISUALS ────────────────────────────────────────
 
   /**
-   * Convertit une case algébrique en coordonnées pixel (centre) sur le SVG 576×576.
+   * Convert an algebraic square to pixel coordinates (center) on the
+   * 576×576 SVG board.
    */
   _squareToXY(sq) {
     const files = 'abcdefgh';
@@ -552,9 +492,8 @@ const UIManager = {
     return { x: col * 72 + 36, y: row * 72 + 36 };
   },
 
-  /** Dessine ou efface la flèche N3 (sprite pixel art) sur le plateau. */
+  /** Draw or clear the N3 arrow (pixel art sprite) on the board. */
   _renderArrow() {
-    // Nettoyer les flèches existantes
     const old = document.getElementById('sf-arrow-img');
     if (old) old.remove();
 
@@ -569,32 +508,29 @@ const UIManager = {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const dist  = Math.sqrt(dx * dx + dy * dy);
-    const angle = Math.atan2(dy, dx) * (180 / Math.PI); // 0° = droite
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
 
-    // Centrer l'image au milieu du segment from→to
     const cx = (from.x + to.x) / 2;
     const cy = (from.y + to.y) / 2;
 
     const img = document.createElement('img');
-    img.id          = 'sf-arrow-img';
-    img.src         = 'assets/ui/arrow-best-move.png';
-    img.draggable   = false;
-    img.className   = 'sf-arrow-sprite';
+    img.id        = 'sf-arrow-img';
+    img.src       = 'assets/ui/arrow-best-move.png';
+    img.draggable = false;
+    img.className = 'sf-arrow-sprite';
 
-    // Étirer la largeur sur toute la distance, hauteur fixe 40px
     const h = 40;
-    img.style.width    = dist + 'px';
-    img.style.height   = h + 'px';
-    img.style.left     = (cx - dist / 2) + 'px';
-    img.style.top      = (cy - h / 2) + 'px';
+    img.style.width     = dist + 'px';
+    img.style.height    = h + 'px';
+    img.style.left      = (cx - dist / 2) + 'px';
+    img.style.top       = (cy - h / 2) + 'px';
     img.style.transform = `rotate(${angle}deg)`;
 
     container.appendChild(img);
   },
 
-  /** Dessine les flèches rouges de menaces (Flow I+). */
+  /** Draw the red threat arrows (Flow I+). */
   _renderThreatArrows() {
-    // Nettoyer les anciennes flèches
     document.querySelectorAll('.threat-arrow-img').forEach(el => el.remove());
 
     if (this.flowThreats.length === 0) return;
@@ -626,7 +562,7 @@ const UIManager = {
     });
   },
 
-  /** Affiche les pièces capturées de chaque côté avec la différence matérielle. */
+  /** Display captured pieces on each side with the material difference. */
   _renderCapturedPieces() {
     const capWhiteEl = document.getElementById('captured-white');
     const capBlackEl = document.getElementById('captured-black');
@@ -635,9 +571,7 @@ const UIManager = {
     const { byWhite, byBlack, diff } = ChessEngine.getCapturedPieces();
     const playerColor = ChessEngine.getPlayerColor();
 
-    // Le joueur est toujours en bas. "captured-white" est en bas, "captured-black" en haut.
-    // En bas : pièces que le joueur a capturées
-    // En haut : pièces que l'adversaire a capturées
+    // The player is always at the bottom. captured-white = bottom, captured-black = top.
     const playerCaptures   = playerColor === 'w' ? byWhite : byBlack;
     const opponentCaptures = playerColor === 'w' ? byBlack : byWhite;
     const playerDiff       = playerColor === 'w' ? diff : -diff;
@@ -645,7 +579,6 @@ const UIManager = {
     capWhiteEl.innerHTML = '';
     capBlackEl.innerHTML = '';
 
-    // Rendu des mini-pièces capturées (en bas = joueur, en haut = adversaire)
     this._fillCapturedRow(capWhiteEl, playerCaptures, playerDiff > 0 ? playerDiff : 0);
     this._fillCapturedRow(capBlackEl, opponentCaptures, playerDiff < 0 ? -playerDiff : 0);
   },
@@ -667,12 +600,12 @@ const UIManager = {
     }
   },
 
-  // ── FLOW REWARDS (surbrillances) ────────────────────────────
+  // ── FLOW REWARDS (highlights) ───────────────────────────────
 
   /**
-   * Sélectionne les pièces à mettre en surbrillance selon le palier Flow.
-   * Flow II : 3 pièces (1 correcte + 1 leurre crédible + 1 piège attractif)
-   * Flow III/MAX : 2 pièces (1 correcte + 1 leurre/piège)
+   * Pick pieces to highlight based on the Flow tier.
+   * Flow II : 3 pieces (1 correct + 1 credible decoy + 1 attractive trap)
+   * Flow III/MAX : 2 pieces (1 correct + 1 decoy/trap)
    */
   async _computeFlowHighlights(palier) {
     const pvLines = await ChessEngine.getMultiPV(8);
@@ -682,7 +615,7 @@ const UIManager = {
     const bestFrom = bestMove.move.substring(0, 2);
     this.flowCorrectSquare = bestFrom;
 
-    // Grouper les coups par pièce source
+    // Group moves by source piece
     const byPiece = {};
     for (const pv of pvLines) {
       const from = pv.move.substring(0, 2);
@@ -690,8 +623,8 @@ const UIManager = {
       byPiece[from].push(pv);
     }
 
-    // Candidats leurres crédibles : pièces différentes du meilleur coup,
-    // dont le meilleur coup est dans les 120cp du top
+    // Credible decoy candidates: pieces other than the best move whose
+    // best move is within 120cp of the top
     const credible = [];
     for (const [sq, moves] of Object.entries(byPiece)) {
       if (sq === bestFrom) continue;
@@ -703,10 +636,9 @@ const UIManager = {
     }
     credible.sort((a, b) => a.delta - b.delta);
 
-    // Candidats pièges : pièces avec un coup qui SEMBLE bon (capture ou échec)
-    // mais dont l'éval est > 100cp pire que le meilleur coup
+    // Trap candidates: pieces with a move that LOOKS good (capture or check)
+    // but whose eval is > 100cp worse than the best move
     const traps = [];
-    const fen  = ChessEngine.getFEN();
     const allMoves = ChessEngine.getLegalMoves();
 
     for (const m of allMoves) {
@@ -715,11 +647,9 @@ const UIManager = {
       const isCheck   = m.san.includes('+');
       if (!isCapture && !isCheck) continue;
 
-      // Vérifier si ce coup est dans les PV (si oui, c'est crédible, pas un piège)
       const inPV = pvLines.some(pv => pv.move === m.from + m.to);
       if (inPV) continue;
 
-      // Ce coup agressif n'est PAS dans les top 8 → probablement mauvais
       if (!traps.find(t => t.square === m.from)) {
         traps.push({
           square:    m.from,
@@ -735,26 +665,22 @@ const UIManager = {
       ? CareerManager.getPlayer().elo : 800;
     const trapChance = elo < 1200 ? 0.6 : elo < 1600 ? 0.5 : 0.35;
 
-    // Sélection finale
     const numPieces = palier >= 3 ? 2 : 3;
     const highlights = [bestFrom];
 
     if (numPieces === 3) {
-      // Flow II : 1 correct + 1 crédible + 1 piège (ou 2 crédibles si pas de piège)
+      // Flow II: 1 correct + 1 credible + 1 trap (or 2 credibles if no trap)
       const useTraps = traps.length > 0 && Math.random() < trapChance;
 
       if (useTraps) {
-        // 1 crédible + 1 piège
         if (credible.length > 0) highlights.push(credible[0].square);
         highlights.push(traps[Math.floor(Math.random() * traps.length)].square);
       } else {
-        // 2 crédibles
         for (let i = 0; i < 2 && i < credible.length; i++) {
           highlights.push(credible[i].square);
         }
       }
 
-      // Compléter si pas assez de candidats
       if (highlights.length < 3) {
         for (const t of traps) {
           if (highlights.length >= 3) break;
@@ -768,7 +694,7 @@ const UIManager = {
         }
       }
     } else {
-      // Flow III : 1 correct + 1 leurre/piège
+      // Flow III: 1 correct + 1 decoy/trap
       const useTraps = traps.length > 0 && Math.random() < trapChance;
       if (useTraps) {
         highlights.push(traps[Math.floor(Math.random() * traps.length)].square);
@@ -777,14 +703,13 @@ const UIManager = {
       } else if (traps.length > 0) {
         highlights.push(traps[0].square);
       } else {
-        // Fallback : n'importe quelle autre pièce
         for (const m of allMoves) {
           if (!highlights.includes(m.from)) { highlights.push(m.from); break; }
         }
       }
     }
 
-    // Mélanger pour que la bonne pièce ne soit pas toujours en premier
+    // Shuffle so the correct piece isn't always first
     for (let i = highlights.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [highlights[i], highlights[j]] = [highlights[j], highlights[i]];
@@ -793,35 +718,58 @@ const UIManager = {
     this.flowHighlights = highlights;
   },
 
-  /** Efface tous les visuels Stockfish et Flow rewards. */
-  _clearStockfishVisuals() {
-    this.sfArrow          = null;
-    this.flowThreats      = [];
-    this.flowHighlights   = [];
-    this.flowCorrectSquare = null;
+  /** Brief flash of the correct square when the player picks a decoy. */
+  _flashCorrectSquare() {
+    if (!this.flowCorrectSquare) return;
+    const el = document.querySelector(`[data-square="${this.flowCorrectSquare}"]`);
+    if (!el) return;
+    el.classList.add('intuition-correct-flash');
+    setTimeout(() => el.classList.remove('intuition-correct-flash'), 1200);
   },
 
-  // ── ÉVALUATION DES COUPS (callback FocusSystem) ─────────────
-
   /**
-   * Appelé par FocusSystem après chaque évaluation de coup du joueur.
-   * Met à jour l'historique et affiche le texte flottant sur l'échiquier.
+   * Activate Intuition: spend Focus and compute highlights.
+   * Called by the Intuition button in the sidebar.
    */
+  async activateIntuition() {
+    if (this._aiThinking) return;
+    if (this._intuitionActive) return;
+
+    const cost = FocusSystem.activateIntuition();
+    if (cost === false) return;
+
+    this._intuitionActive = true;
+
+    await ChessEngine.waitForBgEval();
+    const palier = FocusSystem.getFlowStateInfo().palier;
+    await this._computeFlowHighlights(palier);
+
+    this.renderBoard();
+    FocusSystem.render();
+  },
+
+  /** Clear all Stockfish and Flow reward visuals. */
+  _clearStockfishVisuals() {
+    this.sfArrow           = null;
+    this.flowThreats       = [];
+    this.flowHighlights    = [];
+    this.flowCorrectSquare = null;
+    this._intuitionActive  = false;
+  },
+
+  // ── MOVE EVAL CALLBACK (from FocusSystem) ───────────────────
+
   _onMoveEvaluated(evalInfo) {
     if (!evalInfo || !evalInfo.ply) return;
     this._moveEvals[evalInfo.ply] = evalInfo;
     this.updateMoveHistory();
 
-    // Texte flottant sur la case destination
     const square = this._moveEvalSquares[evalInfo.ply];
     if (square && evalInfo.key !== 'neutral') {
       this._showFloatingEval(square, evalInfo);
     }
   },
 
-  /**
-   * Affiche un texte flottant animé (monte + disparaît) sur la case indiquée.
-   */
   _showFloatingEval(square, evalInfo) {
     const el = document.querySelector(`[data-square="${square}"]`);
     if (!el) return;
@@ -831,70 +779,44 @@ const UIManager = {
     float.textContent = evalInfo.label;
     el.appendChild(float);
 
-    // Supprimer après l'animation (1.5s)
     setTimeout(() => float.remove(), 1600);
   },
 
-  // ── MAIA UI (barre de progression dashboard) ────────────────
+  // ── MAIA LOADING BAR ────────────────────────────────────────
 
   _updateMaiaUI(status, progress) {
-    const btn  = document.getElementById('dash-btn-play');
     const wrap = document.getElementById('maia-loading-bar');
     const bar  = document.getElementById('maia-loading-progress');
     const text = document.getElementById('maia-loading-text');
-    if (!btn) return;
+    if (!wrap) return;
 
     if (status === 'ready') {
-      btn.disabled = false;
-      btn.textContent = '♟ Jouer une partie';
-      if (wrap) wrap.classList.add('hidden');
+      wrap.classList.add('hidden');
     } else if (status === 'downloading') {
-      btn.disabled = true;
-      btn.textContent = 'Chargement de l\'IA…';
-      if (wrap) wrap.classList.remove('hidden');
+      wrap.classList.remove('hidden');
       if (bar)  bar.value = progress;
-      if (text) text.textContent = `Chargement de l'IA… ${progress}%`;
+      if (text) text.textContent = `Loading AI… ${progress}%`;
     } else if (status === 'loading') {
-      btn.disabled = true;
-      btn.textContent = 'Chargement de l\'IA…';
-      if (wrap) wrap.classList.remove('hidden');
+      wrap.classList.remove('hidden');
+      if (text) text.textContent = 'Loading AI…';
     } else if (status === 'error') {
-      btn.disabled = true;
-      btn.textContent = 'Erreur IA';
-      if (text) text.textContent = 'Erreur de chargement. Rechargez la page.';
-      if (wrap) wrap.classList.remove('hidden');
+      wrap.classList.remove('hidden');
+      if (text) text.textContent = 'AI loading error. Please reload the page.';
       if (bar)  bar.classList.add('hidden');
     }
   },
 
-  // ── ADVERSAIRE IA ───────────────────────────────────────────
+  // ── AI MOVE ─────────────────────────────────────────────────
 
-  /**
-   * Génère un adversaire avec nom et Elo proches du joueur (±200).
-   */
-  _generateOpponent() {
-    const stats     = CareerManager.getPublicStats();
-    const playerElo = stats.elo;
-    const delta     = Math.floor(Math.random() * 401) - 200; // -200 à +200
-    this._opponentElo  = Math.max(400, playerElo + delta);
-    this._opponentName = this._OPPONENT_NAMES[
-      Math.floor(Math.random() * this._OPPONENT_NAMES.length)
-    ];
-  },
-
-  /**
-   * Déclenche le coup de l'IA après le coup du joueur.
-   * Désactive le plateau, attend un délai naturel, appelle Maia, joue le coup.
-   */
   async _triggerAIMove() {
     this._aiThinking = true;
-    this.showStatus('L\'adversaire réfléchit…');
+    this.showStatus('Opponent thinking…');
 
     try {
       const fen       = ChessEngine.getFEN();
-      const playerElo = CareerManager.getPublicStats().elo;
+      const stats     = CareerManager.getPublicStats();
+      const playerElo = stats ? stats.elo : 800;
 
-      // 1. Obtenir le coup de l'IA
       let move = null;
       const plyCount = ChessEngine.getHistory().length;
       if (plyCount < 12) {
@@ -915,35 +837,25 @@ const UIManager = {
       const to    = move.substring(2, 4);
       const promo = move.length > 4 ? move[4] : 'q';
 
-      // 2. Appliquer le coup silencieusement (pas de render encore)
       const moveResult = ChessEngine.makeMove(from, to, promo);
       if (!moveResult) {
-        console.error('[AI] Coup illégal de Maia:', move);
+        console.error('[AI] Illegal move from Maia:', move);
         this._aiThinking = false;
         return;
       }
 
-      // 3. Délai "réflexion" en parallèle de : attente éval Focus + Flow rewards
       const minDelay = new Promise(r => setTimeout(r, 800 + Math.random() * 700));
 
-      // Attendre que l'éval Focus du coup précédent termine
-      // avant de toucher au worker Stockfish (multiPV, etc.)
       const flowRewardsPromise = (async () => {
         await ChessEngine.waitForBgEval();
         const flowInfo = FocusSystem.getFlowStateInfo();
-        // Menaces (synchrone, rapide)
         if (flowInfo.palier >= 1) {
           this.flowThreats = ChessEngine.getThreats();
-        }
-        // Surbrillances multiPV (async, utilise le worker)
-        if (flowInfo.palier >= 2) {
-          await this._computeFlowHighlights(flowInfo.palier);
         }
       })();
 
       await Promise.all([minDelay, flowRewardsPromise]);
 
-      // 4. Son + rendu (tout d'un coup, après le "temps de réflexion")
       if (typeof SoundManager !== 'undefined') {
         if (moveResult.captured) SoundManager.playCapture();
         else                     SoundManager.playMove();
@@ -955,11 +867,11 @@ const UIManager = {
       this._aiThinking = false;
 
       if (this._checkGameEnd()) return;
-      this.showStatus('À toi de jouer.');
+      this.showStatus('Your move.');
     } catch (e) {
-      console.error('[AI] Erreur:', e);
+      console.error('[AI] Error:', e);
       this._aiThinking = false;
-      this.showStatus('Erreur IA — relance une partie.');
+      this.showStatus('AI error — start a new game.');
     }
   },
 
@@ -975,135 +887,124 @@ const UIManager = {
     return null;
   },
 
+  // ── BUTTON BINDINGS ─────────────────────────────────────────
+
   _bindButtons() {
-    // Création du personnage
-    document.getElementById('btn-create-player').onclick = () => {
-      const nom         = document.getElementById('input-nom').value.trim();
-      const nationalite = document.getElementById('input-nationalite').value.trim();
-      const style       = document.getElementById('input-style').value;
-
-      if (!nom) {
-        document.getElementById('input-nom').focus();
-        return;
-      }
-
-      CareerManager.createPlayer(nom, nationalite || '—', style);
-      document.getElementById('modal-create-player').close();
-      this.showScreen('dashboard');
-    };
-
-    // Dashboard — ouvrir le choix de couleur
-    document.getElementById('dash-btn-play').onclick = () => {
-      if (!MaiaEngine.isReady()) return;
-      document.getElementById('modal-color-choice').showModal();
-    };
-
-    // Choix de couleur → lancer la partie
+    // Color choice → start the game with the picked color
     const startWithColor = (color) => {
       document.getElementById('modal-color-choice').close();
-      this.showScreen('game');
       this.newGame(color);
     };
-    document.getElementById('pick-white').onclick  = () => startWithColor('w');
-    document.getElementById('pick-black').onclick  = () => startWithColor('b');
-    document.getElementById('pick-random').onclick = () => startWithColor(Math.random() < 0.5 ? 'w' : 'b');
+    const pickW = document.getElementById('pick-white');
+    const pickB = document.getElementById('pick-black');
+    const pickR = document.getElementById('pick-random');
+    if (pickW) pickW.onclick = () => startWithColor('w');
+    if (pickB) pickB.onclick = () => startWithColor('b');
+    if (pickR) pickR.onclick = () => startWithColor(Math.random() < 0.5 ? 'w' : 'b');
 
-    document.getElementById('dash-btn-delete').onclick = () => {
-      if (confirm('Effacer la sauvegarde ? Cette action est irréversible.')) {
-        SaveManager.deleteSave();
-        location.reload();
-      }
-    };
+    // New game button — opens the color choice modal
+    const btnNewGame = document.getElementById('btn-new-game');
+    if (btnNewGame) {
+      btnNewGame.onclick = () => {
+        if (!MaiaEngine.isReady()) return;
+        document.getElementById('modal-color-choice').showModal();
+      };
+    }
 
-    // Écran jeu
-    document.getElementById('btn-back-dashboard').onclick = () => {
-      CareerManager.syncFocus();
-      this.showScreen('dashboard');
-    };
+    // N3 — Best move: source → destination arrow
+    const btnSf3 = document.getElementById('btn-sf3');
+    if (btnSf3) {
+      btnSf3.onclick = async () => {
+        if (this._aiThinking) return;
 
-    document.getElementById('btn-new-game').onclick = () => this.newGame();
+        const flowInfo = FocusSystem.getFlowStateInfo();
+        const isFreeN3 = flowInfo.palier >= 3;
 
-    // N3 — Meilleur coup : flèche source → destination
-    document.getElementById('btn-sf3').onclick = async () => {
-      // Bloquer pendant le tour de l'IA
-      if (this._aiThinking) return;
+        if (isFreeN3) {
+          FocusSystem.activateStockfish(3);
+        } else {
+          if (!FocusSystem.activateStockfish(3)) return;
+        }
+        document.getElementById('sf-feedback').textContent = 'N3 — Analyzing…';
 
-      // En Flow III+ : N3 gratuit (pas de coût Focus, mais pénalité max + sort du Flow)
-      const flowInfo = FocusSystem.getFlowStateInfo();
-      const isFreeN3 = flowInfo.palier >= 3;
+        await ChessEngine.waitForBgEval();
+        const best = await ChessEngine.getBestMove();
+        if (best) {
+          this.sfArrow = { from: best.from, to: best.to };
+          document.getElementById('sf-feedback').textContent =
+            'N3 active — arrow shows the best move.';
+          this.renderBoard();
+        } else {
+          document.getElementById('sf-feedback').textContent = 'N3 — No move found.';
+        }
+      };
+    }
 
-      if (isFreeN3) {
-        // N3 gratuit en Flow III+ : applique seulement la pénalité max et sort du Flow
-        FocusSystem.activateStockfish(3);
-      } else {
-        if (!FocusSystem.activateStockfish(3)) return;
-      }
-      document.getElementById('sf-feedback').textContent = 'N3 — Analyse en cours…';
+    // Intuition (Flow II+ highlights)
+    const btnIntuition = document.getElementById('btn-intuition');
+    if (btnIntuition) {
+      btnIntuition.onclick = () => this.activateIntuition();
+    }
 
-      // Attendre que l'éval Focus termine pour ne pas corrompre le worker
-      await ChessEngine.waitForBgEval();
-      const best = await ChessEngine.getBestMove();
-      if (best) {
-        this.sfArrow = { from: best.from, to: best.to };
-        document.getElementById('sf-feedback').textContent =
-          'N3 actif — la flèche montre le meilleur coup.';
+    // Takeback
+    const btnTakeback = document.getElementById('btn-takeback');
+    if (btnTakeback) {
+      btnTakeback.onclick = () => {
+        if (this._aiThinking) return;
+        if (ChessEngine.getHistory().length === 0) return;
+        if (!FocusSystem.activateTakeback()) return;
+
+        if (!ChessEngine.takeback()) return;
+
+        this.lastMove       = null;
+        this.selectedSquare = null;
+        this.legalMoves     = [];
+        this._clearStockfishVisuals();
         this.renderBoard();
-      } else {
-        document.getElementById('sf-feedback').textContent = 'N3 — Aucun coup trouvé.';
-      }
-    };
+        this.updateMoveHistory();
+        this.showStatus('Move taken back — your move.');
+      };
+    }
 
-    // Reprise de coup
-    document.getElementById('btn-takeback').onclick = () => {
-      // Ne pas permettre pendant le tour de l'IA
-      if (this._aiThinking) return;
-      if (ChessEngine.getHistory().length === 0) return;
-      if (!FocusSystem.activateTakeback()) return;
-
-      // Annuler le(s) coup(s) dans le moteur
-      if (!ChessEngine.takeback()) return;
-
-      // Rafraîchir l'UI
-      this.lastMove       = null;
-      this.selectedSquare = null;
-      this.legalMoves     = [];
-      this._clearStockfishVisuals();
-      this.renderBoard();
-      this.updateMoveHistory();
-      this.showStatus('Coup repris — à toi de jouer.');
-    };
-
-    // Revue post-partie — fermeture
-    document.getElementById('btn-close-review').onclick = () => {
-      ReviewManager.stopReview();
-      CareerManager.syncFocus();
-      this.showScreen('dashboard');
-    };
-
+    // Post-game review: close → sync focus
+    const btnCloseReview = document.getElementById('btn-close-review');
+    if (btnCloseReview) {
+      btnCloseReview.onclick = () => {
+        ReviewManager.stopReview();
+        CareerManager.syncFocus();
+      };
+    }
   },
 
 };
 
-// ── LANCEMENT ───────────────────────────────────────────────────
+// ── BOOTSTRAP ───────────────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', () => {
   ChessEngine.init();
   MaiaEngine.setStatusCallback((status, progress) => {
     UIManager._updateMaiaUI(status, progress);
   });
-  MaiaEngine.init();   // async — tourne en arrière-plan
+  MaiaEngine.init(); // async — runs in background
   CareerManager.init();
   UIManager.init();
 
-  // ── Musique de fond (ON par défaut) ──
-  const bgMusic = document.getElementById('bg-music');
+  // Phase A stub: if no character, create a default one silently so
+  // the game screen is immediately usable for testing. Phase B will
+  // replace this with a proper character-creator flow.
+  if (!CareerManager.hasCharacter()) {
+    CareerManager.createPlayer('Player', 'Norway');
+  }
+
+  UIManager.showGameScreen();
+
+  // Background music (ON by default)
+  const bgMusic  = document.getElementById('bg-music');
   const btnMusic = document.getElementById('btn-music');
   if (bgMusic && btnMusic) {
     bgMusic.volume = 0.15;
-    let musicWanted = true;   // l'utilisateur veut la musique
+    let musicWanted = true;
 
-    // Les navigateurs bloquent autoplay avant toute interaction.
-    // On tente play() immédiatement ; si ça échoue, on relance au
-    // premier clic n'importe où sur la page.
     function startMusic() {
       if (!musicWanted) return;
       bgMusic.play().then(() => {
@@ -1118,7 +1019,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }, { once: true });
 
     btnMusic.addEventListener('click', (e) => {
-      e.stopPropagation();           // ne pas re-trigger autoStart
+      e.stopPropagation();
       if (!bgMusic.paused) {
         bgMusic.pause();
         musicWanted = false;
@@ -1134,7 +1035,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ── Toggle SFX ──
+  // SFX toggle
   const btnSfx = document.getElementById('btn-sfx');
   if (btnSfx) {
     btnSfx.addEventListener('click', () => {

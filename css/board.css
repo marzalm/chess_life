@@ -234,6 +234,17 @@ body {
   to   { box-shadow: inset 0 0 8px 4px rgba(251, 191, 36, 0.5); }
 }
 
+/* ── INTUITION CORRECT FLASH : clignote la bonne case après erreur ── */
+
+.square.intuition-correct-flash {
+  animation: intuition-flash 0.3s ease-in-out 4;
+}
+
+@keyframes intuition-flash {
+  0%, 100% { background: inherit; }
+  50%      { background: rgba(29, 158, 117, 0.45) !important; box-shadow: inset 0 0 8px 3px rgba(29, 158, 117, 0.6); }
+}
+
 /* ── THREAT ARROWS : flèches rouges menaces Flow I+ ── */
 
 .threat-arrow-img {

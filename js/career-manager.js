@@ -1,26 +1,24 @@
 // career-manager.js
-// Entité joueur, formule Elo FIDE et persistance de carrière.
-// Boîte noire pure — aucun accès au DOM.
-// Tous les calculs de Focus passent exclusivement par FocusSystem.
+// Player entity, FIDE Elo formula, career persistence.
+// Pure black box — no DOM access.
+// All Focus calculations go exclusively through FocusSystem.
+//
+// Phase A: flat schema. Phase B will restructure into nested domains
+// (player / calendar / finances / ...).
 
 const CareerManager = (() => {
 
   let _state = null;
 
-  // Schéma complet du playerState
   const DEFAULT_STATE = {
-    nom:               '',
-    nationalite:       '',
-    styleDeJeu:        '',          // 'Positionnel' | 'Tactique' | 'Universel'
-    elo:               800,
-    focusMax:          100,
-    focusCurrent:      100,
-    ouvertures:        10,
-    endgame:           10,
-    confiance:         50,          // stat cachée — ne jamais exposer dans l'UI
-    solde:             500,
-    semaine:           1,
-    historiqueParties: [],
+    playerName:   '',
+    nationality:  '',
+    elo:          800,
+    focusMax:     100,
+    focusCurrent: 100,
+    money:        500,
+    week:         1,
+    gameHistory:  [],
   };
 
   function _save() {
@@ -29,107 +27,89 @@ const CareerManager = (() => {
 
   return {
 
-    // ── INITIALISATION ────────────────────────────────────────────
+    // ── INIT ──────────────────────────────────────────────────────
 
-    /**
-     * Charge la sauvegarde ou crée un état vierge.
-     * Synchronise FocusSystem avec les valeurs persistées.
-     */
     init() {
       if (SaveManager.hasSave()) {
         _state = SaveManager.load();
-        // Migrations défensives : ajouter les clés absentes des saves anciennes
+        // Defensive migration: fill missing keys from defaults
         for (const [key, val] of Object.entries(DEFAULT_STATE)) {
           if (_state[key] === undefined) _state[key] = val;
         }
       } else {
-        _state = { ...DEFAULT_STATE, historiqueParties: [] };
+        _state = { ...DEFAULT_STATE, gameHistory: [] };
       }
-      // Synchroniser FocusSystem avec les valeurs du joueur
       FocusSystem.current = _state.focusCurrent;
       FocusSystem.max     = _state.focusMax;
       FocusSystem.render();
     },
 
-    /** @returns {boolean} true si un personnage nommé a été créé */
     hasCharacter() {
-      return Boolean(_state && _state.nom);
+      return Boolean(_state && _state.playerName);
     },
 
-    // ── CRÉATION DU PERSONNAGE ────────────────────────────────────
+    // ── CHARACTER CREATION ────────────────────────────────────────
 
     /**
-     * Crée le personnage. Appelé une seule fois, au premier lancement.
-     * @param {string} nom
-     * @param {string} nationalite
-     * @param {string} styleDeJeu  - 'Positionnel'|'Tactique'|'Universel'
+     * Create the player. Called once, at first launch.
+     * @param {string} playerName
+     * @param {string} nationality - ISO code or name
      */
-    createPlayer(nom, nationalite, styleDeJeu) {
+    createPlayer(playerName, nationality) {
       _state = {
         ...DEFAULT_STATE,
-        historiqueParties: [],
-        nom:         nom.trim(),
-        nationalite: nationalite.trim(),
-        styleDeJeu,
+        gameHistory: [],
+        playerName:  playerName.trim(),
+        nationality: nationality.trim(),
       };
       _save();
     },
 
-    // ── STATS PUBLIQUES ───────────────────────────────────────────
+    // ── PUBLIC STATS ──────────────────────────────────────────────
 
-    /**
-     * Retourne les stats affichables — confiance exclue.
-     * @returns {object}
-     */
     getPublicStats() {
-      const { confiance, ...visible } = _state;
-      return { ...visible };
+      return _state ? { ..._state } : null;
     },
 
-    /**
-     * Retourne l'état complet du joueur, y compris la confiance (stat cachée).
-     * Utilisé par FocusSystem pour appliquer les modificateurs de confiance.
-     * @returns {object|null}
-     */
     getPlayer() {
       return _state ? { ..._state } : null;
     },
 
-    // ── FORMULE ELO FIDE ─────────────────────────────────────────
+    // ── FIDE ELO FORMULA ──────────────────────────────────────────
 
     /**
-     * Calcule et applique le delta Elo après une partie.
+     * Compute and apply the Elo delta after a game.
      *
-     * E  = 1 / (1 + 10 ** ((Elo_opp - Elo_joueur) / 400))
-     * D  = K * (score - E)
-     * K  = 32 si Elo < 2400, sinon 16
+     *   E  = 1 / (1 + 10 ** ((opponentElo - playerElo) / 400))
+     *   D  = K * (score - E)
+     *   K  = 32 if elo < 2400, otherwise 16
      *
-     * @param {number} score       - 1 victoire | 0.5 nulle | 0 défaite
+     * @param {number} score       - 1 win | 0.5 draw | 0 loss
      * @param {number} opponentElo
-     * @returns {number}           - delta arrondi (+/-)
+     * @returns {number} rounded delta
      */
     updateElo(score, opponentElo) {
       const E     = 1 / (1 + 10 ** ((opponentElo - _state.elo) / 400));
       const K     = _state.elo < 2400 ? 32 : 16;
       const delta = Math.round(K * (score - E));
       _state.elo  = Math.max(100, _state.elo + delta);
-      console.log(`[Elo] E=${E.toFixed(4)}  score=${score}  K=${K}  delta=${delta}  nouvel Elo=${_state.elo}`);
+      console.log(`[Elo] E=${E.toFixed(4)}  score=${score}  K=${K}  delta=${delta}  newElo=${_state.elo}`);
       _save();
       return delta;
     },
 
     /**
-     * Enregistre une partie : applique l'Elo et archive l'entrée.
+     * Record a played game: apply Elo and archive the entry.
      * @param {{ opponentName: string, opponentElo: number,
      *           result: 'win'|'draw'|'loss', moves: number }} entry
-     * @returns {number} delta Elo
+     * @returns {number} Elo delta
      */
     recordGame(entry) {
       const scoreMap  = { win: 1, draw: 0.5, loss: 0 };
       const eloBefore = _state.elo;
       const delta     = this.updateElo(scoreMap[entry.result], entry.opponentElo);
 
-      _state.historiqueParties.push({
+      _state.gameHistory.push({
         opponentName: entry.opponentName || '?',
         opponentElo:  entry.opponentElo  || 0,
         result:       entry.result,
@@ -144,20 +124,20 @@ const CareerManager = (() => {
       return delta;
     },
 
-    // ── MODIFICATIONS D'ÉTAT ──────────────────────────────────────
+    // ── STATE MUTATIONS ───────────────────────────────────────────
 
     /**
-     * Modifie le solde. Montant positif = gain, négatif = dépense.
+     * Modify money. Positive = income, negative = expense.
      * @param {number} amount
      */
-    updateSolde(amount) {
-      _state.solde = Math.max(0, _state.solde + amount);
+    updateMoney(amount) {
+      _state.money = Math.max(0, _state.money + amount);
       _save();
     },
 
     /**
-     * Synchronise focusCurrent / focusMax depuis FocusSystem.
-     * À appeler après chaque partie.
+     * Sync focusCurrent / focusMax from FocusSystem.
+     * Call after each game.
      */
     syncFocus() {
       _state.focusCurrent = FocusSystem.current;
@@ -165,19 +145,8 @@ const CareerManager = (() => {
       _save();
     },
 
-    /**
-     * Modifie la confiance du joueur. Plafonné entre 0 et 100.
-     * Utilisable depuis la console ou les événements narratifs (Phase 6).
-     * @param {number} value - nouvelle valeur de confiance
-     */
-    setConfiance(value) {
-      _state.confiance = Math.max(0, Math.min(100, value));
-      _save();
-    },
-
-    /** Incrémente le compteur de semaines. */
     nextWeek() {
-      _state.semaine++;
+      _state.week++;
       _save();
     },
 
