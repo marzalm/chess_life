@@ -121,6 +121,7 @@ Les modules suivants seront **supprimés** lors de la Phase A (nettoyage du pivo
 - **Tous les calculs de Focus passent exclusivement par `focus-system.js`.** Jamais inline ailleurs.
 - **Toute manipulation du temps passe par `calendar-system.js`.** Jamais de calcul de semaine/date ailleurs.
 - **Toute génération de mail passe par `inbox-system.js`.** Les autres modules appellent `inbox.push(templateId, vars)`.
+- **Les notifications cross-domain passent par `GameEvents`.** Pas d'import direct ou d'appel direct entre domaines pour des effets réactifs. Les appels d'API canoniques restent autorisés (`finances.addIncome` reste la source de vérité), mais les effets dans d'autres domaines (inbox, coachs, rivaux, etc.) s'abonnent aux événements.
 - **Les tournois sont déclarés statiquement dans `tournament-data.js`.** Jamais de tournoi hardcodé ailleurs.
 - **Un seul Worker Stockfish pour tout le projet.** Déjà instancié dans `chess-engine.js`, ne jamais en créer un second.
 
@@ -157,16 +158,56 @@ Suppression des fichiers de l'ancienne direction Pokémon, nettoyage d'[index.ht
 **Phase D — Inbox**
 `inbox-system.js` avec templates de mails : articles de presse après chaque tournoi (podium ou pas, performance, Elo gagné), messages automatiques de fédération (invitations, résultats officiels). Écran inbox intégré. Les mails arrivent au fil du calendrier.
 
-**Phase E — Finances, coachs et puzzles thématiques**
-`finance-system.js` minimal : solde, prix de tournois encaissés, inscription payante à certains tournois, frais de voyage. Pas de sponsors ni de revenus secondaires à ce stade.
+- **D.0 ✅ (2026-04-11)** — extraction du flux cross-domain avant l'Inbox. Nouveau `game-events.js` (bus pub/sub synchrone minimal, 5 événements documentés, règle "no re-emit") et nouveau `career-flow.js` (mode `'free' | 'tournament'`, body class, `onGameEnd` sans rendu UI). `UIManager.onGameEnd` pointe désormais vers `CareerFlow`; `UICareer` observe `game_ended` / `tournament_finished`; `TournamentSystem.finalize()` émet `tournament_finished`. 10 nouveaux tests, 143 verts au total. Voir [CHANGELOG.md](CHANGELOG.md).
+- **D.1 ✅ (2026-04-11)** — `inbox-templates.js` (4 templates de base) + `inbox-system.js` (push/read/delete/sort + auto-mails via `GameEvents`). Les mails sont datés en **temps de jeu** (`CalendarDate`), `push()` émet `mail_received`, et chaque `tournament_finished` génère désormais une dépêche de presse + une confirmation de rating fédéral. `TournamentSystem.finalize()` enrichit aussi son payload avec `eloBefore` / `eloAfter`. 21 nouveaux tests, 164 verts au total. Voir [CHANGELOG.md](CHANGELOG.md).
+- **D.2 ✅ (2026-04-11)** — écran Inbox visible dans `UICareer.inbox` avec layout lecteur de mails en deux colonnes, bouton `📬 Inbox` sur le home, badge unread réactif via `mail_received`, et pane de lecture datée en temps de jeu. Le texte des corps de mail utilise `VT323` pour la lisibilité; pas d'UI `delete` / `mark unread` à ce stade (les APIs restent côté logique). Pas de nouveau test Node dédié, les 164 tests existants restent verts. Voir [CHANGELOG.md](CHANGELOG.md).
 
-`staff-system.js` minimal : 2-3 coachs recrutables avec un coût hebdomadaire. Chaque coach a une **spécialité thématique** (ex. Ruy Lopez, tactique-fourchettes, finales roi-pion). Engager un coach déverrouille des séances de puzzles sur ce thème.
+**Phase E — Finances, coach et puzzle-under-pressure**
+Cette phase est la **première manifestation concrète de l'entraîneur caché** : le joueur résout de vrais puzzles d'échecs pour obtenir un avantage in-game visible, donc il apprend réellement tout en jouant. Le coeur n'est plus "réduction de coût Stockfish selon le thème détecté", mais un système **puzzle-under-pressure** à deux sources de bonus qui coexistent.
 
-`puzzle-system.js` : chargement et résolution de puzzles thématiques (format FEN + meilleure séquence). Le joueur accepte une séance via le calendrier ; s'il résout X puzzles sur N, il débloque un **bonus thématique** qui s'applique lors de son prochain tournoi : **réduction du coût Stockfish** (déjà implémenté dans `focus-system.js` via les modificateurs) quand la position jouée matche le thème du coach.
+`finance-system.js` reste minimal en Phase E : coût hebdomadaire du coach, inscriptions payantes, dépenses simples. Pas de sponsors ni de revenus secondaires à ce stade.
 
-**Matching thème ↔ position** : démarrer extrêmement simple — seuls les thèmes d'ouverture sont détectés (comparaison ECO ou préfixe de coups). Les thèmes tactique/finale viennent plus tard quand on saura les détecter proprement. Le bonus est temporaire (un tournoi) pour garder la pression de la répétition et l'engagement avec les coachs.
+`staff-system.js` gère un **slot unique de coach**. Le joueur peut engager / licencier / remplacer, mais ne peut jamais posséder deux coachs en parallèle. Un coach est une **personne** avec un profil de compétence couvrant **22 thèmes verrouillés** :
 
-Cette phase est la **première manifestation concrète de l'entraîneur caché** : le joueur résout de vrais puzzles d'échecs pour obtenir un avantage in-game, donc il apprend réellement tout en jouant.
+- Motifs : `fork`, `pin`, `skewer`, `discoveredAttack`, `hangingPiece`, `sacrifice`, `trappedPiece`, `attackingF2F7`
+- Mates : `mateIn1`, `mateIn2`, `backRankMate`
+- Phases : `opening`, `middlegame`, `endgame`
+- Avancés : `deflection`, `attraction`
+- Ouvertures : `ruyLopez`, `sicilianDefense`, `frenchDefense`, `caroKannDefense`, `italianGame`, `queensPawnGame`
+
+Chaque coach possède `skills[theme]` pour les 22 thèmes ci-dessus, score `0..100`. Il n'existe **aucun plancher caché** : un coach faible sur un thème donne réellement `+0` move sur ce thème. Le mapping qualité → moves supplémentaires est verrouillé et encapsulé dans un helper unique `getCoachMoveBonus(skill)` :
+
+- `0..20` → `+0`
+- `21..50` → `+1`
+- `51..80` → `+2`
+- `81..100` → `+3`
+
+`puzzle-system.js` gère les puzzles thématiques (FEN + séquence solution + thème + difficulté), l'aptitude par thème, le suivi des puzzles vus, et la boucle de renforcement inspirée de Lucas Chess. Les échecs entrent dans une queue de renforcement **player-owned** et n'appartiennent pas au coach : changer de coach ne réinitialise ni l'aptitude, ni les puzzles vus, ni les bonus gagnés, ni les puzzles à réviser.
+
+Deux types de bonus coexistent :
+
+- **Training bonuses** — hors partie. L'auto-entraînement est gratuit dès le jour 1. Une session réussie donne **1 charge** d'un bonus du thème entraîné. Quand le joueur l'invoque en partie, le thème est **connu**.
+- **Flow bonuses** — en partie. Chaque entrée en Flow (palier 1+) donne **1 charge** de bonus Flow, une seule par entrée en Flow. Quand le joueur l'invoque, un puzzle **inédit** est tiré, le thème reste **caché** jusqu'à la résolution, et la consommation n'interrompt pas le Flow.
+
+Quand un bonus (training ou Flow) est invoqué, la vraie partie est **suspendue** sans toucher `chess-engine.js`, le plateau passe en **puzzle mode** sur une instance temporaire, le joueur a **une seule tentative** et temps illimité. Succès : retour à la vraie partie puis playback automatique de Stockfish sur les **X prochains demi-coups / coups récompensés**. Échec : retour à la partie sans récompense. Le bonus est consommé dans tous les cas. Pendant le playback, les clics sont désactivés, le Focus est **pausé** (aucun gain, aucune perte, aucun progrès de Flow), et le contrôle revient au joueur à la fin.
+
+Le nombre de moves Stockfish accordés suit cette base :
+
+- base `2`
+- bonus coach via `getCoachMoveBonus(currentCoach.skills[theme])`
+- bonus aptitude du joueur sur le thème (`+1` si aptitude > 50, `+2` si aptitude > 80)
+- bonus de profil de départ si le thème correspond au style choisi à la création du personnage
+
+**Aucun seuil d'invocation** : le joueur peut dépenser un bonus à n'importe quel moment de son tour, y compris très tôt dans l'ouverture. Le design assume l'auto-régulation plutôt qu'une règle paternaliste du type "pas avant le 10e coup".
+
+**Renforcement verrouillé** : une erreur en entraînement entre dans la queue du thème correspondant. La sortie de renforcement exige **2 confirmations réussies dans des sessions séparées** (`N = 2`) ; un échec pendant cette phase remet la confirmation à zéro.
+
+**Découpage Phase E en sous-phases**
+
+- **E.1** — fondation puzzle : `puzzle-data.js`, `puzzle-system.js`, auto-entraînement standalone, aptitudes, puzzles vus, renforcement, tests
+- **E.2** — bonus d'entraînement en partie : inventory training, invocation, suspension de partie, puzzle mode, playback Stockfish, tests
+- **E.3** — coach + finance : `coach-data.js`, `staff-system.js`, UI coach, coût hebdomadaire, qualité coach sur entraînement et bonus
+- **E.4** — intégration Flow : génération du bonus Flow à l'entrée en palier 1+, thème caché, reveal card, consommation sans casser le Flow
 
 **Phase F — Rivaux et narration**
 `rival-system.js` : 5 à 10 PNJ nommés avec une courbe Elo qui progresse en parallèle. Ils apparaissent dans les tournois, commentent les résultats via l'inbox, créent des rivalités émergentes. Extension des templates de mail pour les messages de rivaux.
@@ -179,7 +220,6 @@ Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pag
 
 **Mis de côté pour le moment (à réintroduire plus tard si besoin)** :
 - Système d'attributs joueur (ouvertures / tactique / finales / mental etc.) — on démarre avec Elo comme seule métrique de progression
-- Simulation de parties (skip) — toutes les parties se jouent en direct pour l'instant
 - Sponsors, cours donnés, revenus secondaires
 - Système d'entraînement avancé (puzzles, drills)
 
@@ -190,6 +230,10 @@ Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pag
 Exemples : variables `playerName` pas `nomJoueur`, fichier `tournament-data.js` pas `donnees-tournois.js`, bouton UI "Continue" pas "Continuer".
 
 ## Intentions futures (à garder en tête pendant les phases suivantes)
+
+- **Si les joueurs le demandent : étendre le skip à `simulate rest of tournament`** sans remettre en cause la version actuelle par round, qui est le plus petit point d'entrée utile pour le test et le pacing.
+
+- **Transitions musique / ambiance entre mode partie et mode puzzle** : différées à la Phase H polish. Phase E se contente de la signalétique visuelle et des hooks sonores minimaux, sans système de transition audio dédié.
 
 - **Niveaux de difficulté global avec scaling dynamique (easy / normal / realistic)** *(décidé en C.4, 2026-04-10)*
 
@@ -326,6 +370,21 @@ est mûr pour être traité.
   deux arrive, basculer sur le pattern ZenGM avec
   `CalendarSystem.PHASE = { IDLE: 0, … }` et un `setPhase(phaseId)`
   central.
+
+- **`seenPuzzleIds` — migration vers bitset / counted array si le catalogue grossit fortement** *(décidé avant E.1, 2026-04-11)*
+  En Phase E on persiste les puzzles vus comme une map sérialisable
+  `{ [puzzleId]: 1 }`, ce qui est simple et suffisant pour ~1000 puzzles
+  statiques. **Refactor déclencheur** : si on passe à un catalogue
+  téléchargé dynamiquement de 10 000+ puzzles, remplacer cette structure
+  par un bitset ou un tableau indexé plus compact pour protéger la taille
+  du save localStorage.
+
+- **`getCoachMoveBonus(skill)` comme point de tuning unique** *(décidé avant E.1, 2026-04-11)*
+  Le mapping verrouillé de Phase E (`0..20 => 0`, `21..50 => 1`,
+  `51..80 => 2`, `81..100 => 3`) doit rester encapsulé dans un helper
+  unique. **Refactor déclencheur** : si les playtests montrent des effets
+  de seuil trop abrupts, ajuster cette seule fonction (linéaire, seuils
+  adoucis, etc.) sans modifier les call sites ni la logique de bonus.
 
 ## Comment tu dois travailler avec moi
 

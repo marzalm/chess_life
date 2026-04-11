@@ -9,6 +9,7 @@ const FocusSystem = {
 
   current:   100,
   max:       100,          // max de base (réduit par usage SF, reset chaque partie)
+  _playbackPaused: false,
 
   /**
    * Tableau de modificateurs dynamiques.
@@ -302,6 +303,8 @@ const FocusSystem = {
    * @param {string} reason - texte affiché dans le log console
    */
   apply(delta, reason) {
+    if (this._playbackPaused) return;
+
     let adjusted = delta;
     if (delta > 0) {
       adjusted = delta * this._getFocusGainMult();
@@ -331,6 +334,8 @@ const FocusSystem = {
    * @param {number}  [plyIndex=0]  - numéro du demi-coup (pour traçabilité UI)
    */
   evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex, isBookMove, pieceCount, cpBefore) {
+    if (this._playbackPaused) return;
+
     const abs = Math.abs(deltaCp);
     const threshold = this._getGoodMoveThreshold();
 
@@ -538,6 +543,8 @@ const FocusSystem = {
   // ── CALLBACKS GAME END ─────────────────────────────────────
 
   onGameEnd(won) {
+    if (this._playbackPaused) return;
+
     // Nettoyer le Flow State
     if (this.flowPalier > 0) {
       this.flowPalier = 0;
@@ -547,6 +554,27 @@ const FocusSystem = {
 
     if (won) this.apply(+20, 'Victoire remportée');
     else     this.apply(-5,  'Défaite');
+  },
+
+  /**
+   * Called when a tournament round is simulated instead of played on
+   * the board. This strips Flow momentum without inventing a separate
+   * recovery rule or touching the current Focus amount.
+   */
+  onRoundSimulated() {
+    if (this._playbackPaused) return;
+
+    this.consecutiveGoodMoves = 0;
+    this._exitFlow();
+    this.render();
+  },
+
+  pauseForPlayback() {
+    this._playbackPaused = true;
+  },
+
+  resumeFromPlayback() {
+    this._playbackPaused = false;
   },
 
   // ── ACTIVATION STOCKFISH (COÛTS FOCUS + PÉNALITÉ MAX) ──────

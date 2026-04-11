@@ -340,6 +340,53 @@
   min-height: 36px;
 }
 
+/* ── TRAINING BONUSES ── */
+
+#training-bonus-section {
+  background: var(--px-panel);
+  border: 3px solid var(--px-gold);
+  box-shadow:
+    inset 1px 1px 0 rgba(251,191,36,0.25),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.training-bonus-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.training-bonus-btn {
+  background: linear-gradient(180deg, rgba(251,191,36,0.14) 0%, rgba(251,191,36,0.06) 100%);
+  color: var(--px-accent);
+  border: 2px solid var(--px-gold);
+  padding: 8px 10px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  text-align: left;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+  cursor: pointer;
+}
+
+.training-bonus-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(251,191,36,0.24) 0%, rgba(251,191,36,0.1) 100%);
+}
+
+.training-bonus-btn:active:not(:disabled) {
+  box-shadow: 0 0 0 rgba(0,0,0,0.35);
+  transform: translate(2px, 2px);
+}
+
+.training-bonus-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ── CONTRÔLES ── */
 
 #game-controls {
@@ -374,6 +421,67 @@
   color: var(--px-text-dim);
   text-align: center;
   min-height: 18px;
+}
+
+/* ── PUZZLE MODE ── */
+
+#board-container {
+  position: relative;
+}
+
+#puzzle-mode-banner {
+  display: none;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  background: rgba(26,17,39,0.95);
+  color: var(--px-gold);
+  border: 3px solid var(--px-gold);
+  box-shadow:
+    inset 1px 1px 0 rgba(251,191,36,0.2),
+    3px 3px 0 rgba(0,0,0,0.45);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+#puzzle-mode-banner:not(.hidden) { display: block; }
+
+#puzzle-outcome-card {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 13;
+  min-width: 280px;
+  max-width: 86%;
+  padding: 14px 18px;
+  background: rgba(26,17,39,0.96);
+  color: var(--px-text);
+  border: 3px solid var(--px-border-hi);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.08),
+    5px 5px 0 rgba(0,0,0,0.5);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  line-height: 1.6;
+  text-align: center;
+  pointer-events: none;
+}
+
+body.puzzle-mode #board-container {
+  border-color: var(--px-gold);
+  box-shadow:
+    0 0 0 4px rgba(251,191,36,0.18),
+    0 0 26px rgba(251,191,36,0.18);
+}
+
+body.puzzle-mode #board {
+  filter: saturate(0.82) brightness(0.94);
+}
+
+body.playback-locked #board-container {
+  cursor: wait;
 }
 
 /* ── HISTORIQUE DES COUPS ── */

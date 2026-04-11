@@ -6,7 +6,7 @@
 //
 // Design inspired by ZenGM's src/worker/core/* layout: state is grouped
 // by domain (player, calendar, focus, finances, history, inbox, staff,
-// rivals) and each domain exposes its own sub-namespace on the public
+// training, rivals) and each domain exposes its own sub-namespace on the public
 // API. Callers should reach into one domain at a time:
 //
 //     const player = CareerManager.player.get();     // live reference
@@ -107,7 +107,31 @@
 
 /**
  * @typedef {object} StaffState
- * @property {object[]} hiredCoaches    Populated in Phase E.
+ * @property {{ id: string, hireDate: CalendarDate } | null} currentCoach
+ */
+
+/**
+ * @typedef {object} TrainingStats
+ * @property {number} sessionsCompleted
+ * @property {number} sessionsPassed
+ * @property {number} puzzlesAttempted
+ * @property {number} puzzlesSolvedAllTime
+ * @property {number} reinforcementPuzzlesSolved
+ * @property {number} bonusesUsedTraining
+ * @property {number} bonusesUsedFlow
+ * @property {object} byTheme
+ */
+
+/**
+ * @typedef {object} TrainingState
+ * @property {Object.<string, number>} aptitudes
+ * @property {Object.<string, 1>} seenPuzzleIds
+ * @property {Object.<string, Array<{ puzzleId: string, state: string, confirmations: number }>>} reinforcementQueues
+ * @property {Object.<string, number>} trainingBonuses
+ * @property {{ earned: boolean, reservedPuzzleId: string | null }} flowBonus
+ * @property {number} puzzleRating
+ * @property {number} puzzleRatingRd
+ * @property {TrainingStats} stats
  */
 
 /**
@@ -121,6 +145,7 @@
  * @property {HistoryState} history
  * @property {InboxState} inbox
  * @property {StaffState} staff
+ * @property {TrainingState} training
  * @property {object[]} rivals           Populated in Phase F.
  */
 
@@ -166,7 +191,29 @@ const CareerManager = (() => {
       trophies:    [],
     },
     inbox: { mails: [] },
-    staff: { hiredCoaches: [] },
+    staff: { currentCoach: null },
+    training: {
+      aptitudes: {},
+      seenPuzzleIds: {},
+      reinforcementQueues: {},
+      trainingBonuses: {},
+      flowBonus: {
+        earned: false,
+        reservedPuzzleId: null,
+      },
+      puzzleRating: 500,
+      puzzleRatingRd: 300,
+      stats: {
+        sessionsCompleted: 0,
+        sessionsPassed: 0,
+        puzzlesAttempted: 0,
+        puzzlesSolvedAllTime: 0,
+        reinforcementPuzzlesSolved: 0,
+        bonusesUsedTraining: 0,
+        bonusesUsedFlow: 0,
+        byTheme: {},
+      },
+    },
     rivals: [],
   };
 
@@ -411,6 +458,26 @@ const CareerManager = (() => {
 
         _save();
         return delta;
+      },
+    },
+
+    // ── INBOX DOMAIN ───────────────────────────────────────────
+
+    inbox: {
+      /** @returns {InboxState} live reference. */
+      get() {
+        _ensure();
+        return _state.inbox;
+      },
+    },
+
+    // ── TRAINING DOMAIN ────────────────────────────────────────
+
+    training: {
+      /** @returns {TrainingState} live reference. */
+      get() {
+        _ensure();
+        return _state.training;
       },
     },
 

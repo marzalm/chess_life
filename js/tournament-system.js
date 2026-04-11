@@ -35,6 +35,8 @@
 
 const TournamentSystem = (() => {
 
+  const SIMULATION_PLAYER_PENALTY = 50;
+
   // ── Default home cities by ISO country code ────────────────
   // The player can later override this with a custom home city
   // (Phase E or beyond). For now we pick a sensible default for
@@ -531,6 +533,7 @@ const TournamentSystem = (() => {
         country:         payload.country,
         isHome:          Boolean(payload.isHome),
         startDate:       _cloneDate(CalendarSystem.getDate()),
+        playerEloStart:  player.elo,
         rounds:          t.rounds,
         daysDuration:    t.daysDuration,
         entryFee:        t.entryFee,
@@ -589,14 +592,27 @@ const TournamentSystem = (() => {
      * and either pair the next round or mark the tournament as done.
      *
      * @param {1 | 0.5 | 0} playerScore  player's perspective
-     * @returns {{ ok: boolean, finished: boolean }}
+     * @param {'board' | 'simulated' | 'bye'} source
+     * @returns {{ ok: boolean, finished: boolean, result?: string, round?: number, opponent?: object | null }}
      */
-    recordPlayerResult(playerScore) {
+    recordPlayerResult(playerScore, source = 'board') {
       const inst = this.getCurrentInstance();
       if (!inst) return { ok: false, finished: false };
       if (![0, 0.5, 1].includes(playerScore)) {
         throw new Error(`[Tournament] Invalid score: ${playerScore}`);
       }
+
+      const pairing = this.getCurrentPlayerPairing();
+      const round = inst.currentRound;
+      const opponent = pairing && pairing.opponent
+        ? {
+            id:          pairing.opponent.id,
+            name:        pairing.opponent.name,
+            elo:         pairing.opponent.elo,
+            nationality: pairing.opponent.nationality,
+          }
+        : null;
+      const result = _scoreToResult(playerScore, source === 'bye');
 
       // Walk every pairing of this round, applying or simulating.
       const roundResults = [];
@@ -642,7 +658,68 @@ const TournamentSystem = (() => {
       }
 
       CareerManager.save();
-      return { ok: true, finished };
+      if (typeof GameEvents !== 'undefined' && GameEvents.EVENTS && GameEvents.EVENTS.ROUND_PLAYED) {
+        GameEvents.emit(GameEvents.EVENTS.ROUND_PLAYED, {
+          tournamentId: inst.tournamentId,
+          round,
+          opponent,
+          result,
+          score: playerScore,
+          source,
+        });
+      }
+      return { ok: true, finished, result, round, opponent };
+    },
+
+    /**
+     * Resolve the player's current pairing without opening the board.
+     * Simulated rounds still count as real career games, so the Elo
+     * / history path runs before the tournament standings update.
+     *
+     * @returns {{ ok: boolean, finished: boolean, result?: string, score?: number, round?: number, opponent?: object | null, source?: string }}
+     */
+    simulatePlayerRound() {
+      const pairing = this.getCurrentPlayerPairing();
+      if (!pairing) return { ok: false, finished: false };
+
+      if (pairing.color === 'bye') {
+        const byeResult = this.recordPlayerResult(1, 'bye');
+        return {
+          ...byeResult,
+          score: 1,
+          source: 'bye',
+        };
+      }
+
+      const player = CareerManager.player.get();
+      const effectivePlayerElo = player.elo - SIMULATION_PLAYER_PENALTY;
+      const score = _simulatePlayerGame(
+        effectivePlayerElo,
+        pairing.opponent.elo,
+      );
+      const result = _scoreToResult(score, false);
+
+      if (CareerManager.history && typeof CareerManager.history.recordGame === 'function') {
+        CareerManager.history.recordGame({
+          opponentName: pairing.opponent.name,
+          opponentElo:  pairing.opponent.elo,
+          result,
+          moves:        0,
+        });
+      }
+
+      const outcome = this.recordPlayerResult(score, 'simulated');
+
+      if (typeof FocusSystem !== 'undefined' &&
+          typeof FocusSystem.onRoundSimulated === 'function') {
+        FocusSystem.onRoundSimulated();
+      }
+
+      return {
+        ...outcome,
+        score,
+        source: 'simulated',
+      };
     },
 
     /** @returns {boolean} true if every round has been played. */
@@ -682,6 +759,8 @@ const TournamentSystem = (() => {
         throw new Error('[Tournament] Cannot finalize before all rounds are played');
       }
 
+      const eloBefore = inst.playerEloStart ?? CareerManager.player.get().elo;
+
       const standings  = this.getStandings();
       const playerRow  = standings.find((s) => s.id === 'player');
       const playerRank = playerRow ? playerRow.rank : standings.length;
@@ -694,6 +773,10 @@ const TournamentSystem = (() => {
         );
       }
 
+      const cal = CareerManager.calendar.get();
+      const finalDate = _addCalDays(cal.date, inst.daysDuration);
+      const eloAfter = CareerManager.player.get().elo;
+
       const summary = {
         tournamentId:   inst.tournamentId,
         tournamentName: inst.tournamentName,
@@ -705,19 +788,21 @@ const TournamentSystem = (() => {
         of:             standings.length,
         score:          playerRow ? playerRow.score : 0,
         prize,
-        date:           new Date().toISOString(),
+        eloBefore,
+        eloAfter,
+        date:           _cloneDate(finalDate),
       };
 
       const history = CareerManager.history.get();
       history.tournaments.push(summary);
 
       // Advance the calendar by daysDuration days
-      const cal = CareerManager.calendar.get();
-      cal.date              = _addCalDays(cal.date, inst.daysDuration);
+      cal.date              = _cloneDate(finalDate);
       cal.phase             = 'idle';
       cal.currentTournament = null;
       cal.currentEvent      = null;
       CareerManager.save();
+      if (typeof GameEvents !== 'undefined') GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_FINISHED, summary);
 
       return {
         rank:  playerRank,
@@ -849,6 +934,19 @@ const TournamentSystem = (() => {
     // 30% draw rate as a flat baseline (chess Swiss roughly)
     if (Math.random() < 0.30) return 0.5;
     return Math.random() < E ? 1 : 0;
+  }
+
+  function _simulatePlayerGame(playerElo, opponentElo) {
+    const E = 1 / (1 + 10 ** ((opponentElo - playerElo) / 400));
+    if (Math.random() < 0.30) return 0.5;
+    return Math.random() < E ? 1 : 0;
+  }
+
+  function _scoreToResult(score, isBye = false) {
+    if (isBye) return 'bye';
+    if (score === 1) return 'win';
+    if (score === 0.5) return 'draw';
+    return 'loss';
   }
 
   function _ordinal(n) {

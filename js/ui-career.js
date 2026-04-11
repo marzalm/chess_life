@@ -18,9 +18,11 @@
 
 const UICareer = (() => {
 
+  const SIMULATE_TOAST_MS = 900;
+
   // ── Screen router ─────────────────────────────────────────
 
-  const SCREENS = ['character', 'home', 'lobby', 'tournament', 'game'];
+  const SCREENS = ['character', 'home', 'lobby', 'inbox', 'tournament', 'game'];
 
   function _showScreen(name) {
     if (!SCREENS.includes(name)) {
@@ -32,17 +34,6 @@ const UICareer = (() => {
     });
   }
 
-  // ── UI mode: tracks whether the game screen is being used in
-  // free-play or in-tournament mode. This drives onGameEnd dispatch
-  // and toggles the body class that hides escape affordances.
-
-  let _mode = 'free'; // 'free' | 'tournament'
-
-  function _setMode(mode) {
-    _mode = mode;
-    document.body.classList.toggle('in-tournament', mode === 'tournament');
-  }
-
   // ── Home screen ───────────────────────────────────────────
 
   const home = {
@@ -52,6 +43,7 @@ const UICareer = (() => {
       this._renderHeader();
       this._renderCalendar();
       this._renderUpcoming();
+      this.renderInboxBadge();
     },
 
     _renderHeader() {
@@ -79,6 +71,19 @@ const UICareer = (() => {
       if (eloEl)   eloEl.textContent   = player.elo;
       if (focusEl) focusEl.textContent = `${Math.round(focus.current)}%`;
       if (moneyEl) moneyEl.textContent = `$ ${finances.money}`;
+    },
+
+    renderInboxBadge() {
+      const badgeEl = document.getElementById('career-inbox-badge');
+      if (!badgeEl) return;
+      const unread = InboxSystem.getUnreadCount();
+      if (unread > 0) {
+        badgeEl.textContent = String(unread);
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.textContent = '0';
+        badgeEl.classList.add('hidden');
+      }
     },
 
     /**
@@ -288,7 +293,7 @@ const UICareer = (() => {
     _enterTournament(ev) {
       try {
         TournamentSystem.startTournament(ev.payload);
-        _setMode('tournament');
+        CareerFlow.enterTournamentMode();
         _showScreen('tournament');
         tournament.render();
         if (typeof SoundManager !== 'undefined') {
@@ -299,6 +304,123 @@ const UICareer = (() => {
       }
     },
 
+  };
+
+  // ── Inbox screen ───────────────────────────────────────────
+
+  let _selectedMailId = null;
+
+  const inbox = {
+    render() {
+      let mails = InboxSystem.getAll();
+      const summaryEl = document.getElementById('inbox-summary');
+      if (summaryEl) {
+        const unread = InboxSystem.getUnreadCount();
+        summaryEl.textContent = unread === 1 ? '1 unread' : `${unread} unread`;
+      }
+
+      if (mails.length === 0) {
+        _selectedMailId = null;
+        this._renderList(mails, null);
+        this._renderEmptyPane('No mail. Play a tournament to see the press react.');
+        return;
+      }
+
+      let selected = mails.find((m) => m.id === _selectedMailId) || mails[0];
+      _selectedMailId = selected.id;
+
+      if (!selected.read) {
+        InboxSystem.markRead(selected.id);
+        home.renderInboxBadge();
+        mails = InboxSystem.getAll();
+        selected = mails.find((m) => m.id === _selectedMailId) || mails[0];
+      }
+
+      this._renderList(mails, selected.id);
+      this._renderPane(selected);
+    },
+
+    _renderList(mails, selectedId) {
+      const listEl = document.getElementById('inbox-list');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+
+      if (mails.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'inbox-empty-state';
+        empty.textContent = 'No mail. Play a tournament to see the press react.';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      mails.forEach((mail) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'inbox-list-row ' + (mail.read ? 'read' : 'unread');
+        if (mail.id === selectedId) row.classList.add('selected');
+        row.addEventListener('click', () => this.onOpenMail(mail.id));
+
+        const subject = document.createElement('div');
+        subject.className = 'inbox-list-subject';
+        subject.textContent = mail.subject;
+
+        const from = document.createElement('div');
+        from.className = 'inbox-list-from';
+        from.textContent = mail.from;
+
+        const date = document.createElement('div');
+        date.className = 'inbox-list-date';
+        date.textContent = CalendarSystem.formatDate(mail.date);
+
+        row.appendChild(subject);
+        row.appendChild(from);
+        row.appendChild(date);
+        listEl.appendChild(row);
+      });
+    },
+
+    _renderPane(mail) {
+      const emptyEl = document.getElementById('inbox-pane-empty');
+      const contentEl = document.getElementById('inbox-pane-content');
+      const fromEl = document.getElementById('inbox-mail-from');
+      const tagEl = document.getElementById('inbox-mail-tag');
+      const dateEl = document.getElementById('inbox-mail-date');
+      const subjectEl = document.getElementById('inbox-mail-subject');
+      const bodyEl = document.getElementById('inbox-mail-body');
+      if (!contentEl || !emptyEl) return;
+
+      emptyEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+
+      if (fromEl) fromEl.textContent = `From: ${mail.from}`;
+      if (tagEl) tagEl.textContent = mail.tag || 'mail';
+      if (dateEl) dateEl.textContent = CalendarSystem.formatDate(mail.date);
+      if (subjectEl) subjectEl.textContent = mail.subject;
+      if (bodyEl) bodyEl.textContent = mail.body;
+    },
+
+    _renderEmptyPane(message) {
+      const emptyEl = document.getElementById('inbox-pane-empty');
+      const contentEl = document.getElementById('inbox-pane-content');
+      if (!emptyEl || !contentEl) return;
+      emptyEl.textContent = message || 'Select a mail to read.';
+      emptyEl.classList.remove('hidden');
+      contentEl.classList.add('hidden');
+    },
+
+    onOpenMail(id) {
+      _selectedMailId = id;
+      InboxSystem.markRead(id);
+      home.renderInboxBadge();
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      this.render();
+    },
+
+    onBack() {
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      _showScreen('home');
+      home.render();
+    },
   };
 
   // ── Tournament lobby screen ──────────────────────────────
@@ -482,6 +604,7 @@ const UICareer = (() => {
   // ── In-tournament screen ─────────────────────────────────
 
   const tournament = {
+    _simulateToastTimer: null,
 
     /** Refresh the in-tournament screen from the live instance. */
     render() {
@@ -589,6 +712,7 @@ const UICareer = (() => {
       const oppEloEl  = document.getElementById('t-opp-elo');
       const colorEl   = document.getElementById('t-color');
       const playBtn   = document.getElementById('btn-play-round');
+      const simBtn    = document.getElementById('btn-simulate-round');
 
       if (pairing.color === 'bye') {
         if (oppNameEl) oppNameEl.textContent = '— BYE —';
@@ -598,6 +722,7 @@ const UICareer = (() => {
           colorEl.className   = 't-color-indicator bye';
         }
         if (playBtn) playBtn.textContent = '▶ Take the bye (+1)';
+        if (simBtn)  simBtn.textContent  = '⏩ Take the bye';
       } else {
         const flag = COUNTRY_FLAGS[pairing.opponent.nationality] || '';
         if (oppNameEl) oppNameEl.textContent = `${flag} ${pairing.opponent.name}`;
@@ -608,6 +733,7 @@ const UICareer = (() => {
           colorEl.className   = 't-color-indicator ' + c;
         }
         if (playBtn) playBtn.textContent = '▶ Play round';
+        if (simBtn)  simBtn.textContent  = '⏩ Simulate round';
       }
     },
 
@@ -717,7 +843,7 @@ const UICareer = (() => {
 
       if (pairing.color === 'bye') {
         // Free point — no game to play
-        TournamentSystem.recordPlayerResult(1);
+        TournamentSystem.recordPlayerResult(1, 'bye');
         if (typeof SoundManager !== 'undefined') SoundManager.playGoodMove(2);
         this.render();
         return;
@@ -734,6 +860,15 @@ const UICareer = (() => {
       UIManager.newGame(pairing.color);
     },
 
+    onSimulateRound() {
+      const result = TournamentSystem.simulatePlayerRound();
+      if (!result.ok) return;
+
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      this._showSimulationToast(result);
+      this.render();
+    },
+
     /** Finalize button handler. */
     onFinalize() {
       try {
@@ -742,9 +877,6 @@ const UICareer = (() => {
           if (result.prize > 0) SoundManager.playVictory();
           else                  SoundManager.playFlowExit();
         }
-        _setMode('free');
-        _showScreen('home');
-        home.render();
 
         const status = document.getElementById('career-continue-status');
         if (status) {
@@ -757,6 +889,38 @@ const UICareer = (() => {
       }
     },
 
+    _showSimulationToast(summary) {
+      const toastEl = document.getElementById('t-sim-toast');
+      if (!toastEl) return;
+
+      toastEl.textContent = this._formatSimulationToast(summary);
+      toastEl.classList.remove('hidden');
+
+      if (this._simulateToastTimer) {
+        clearTimeout(this._simulateToastTimer);
+      }
+
+      this._simulateToastTimer = setTimeout(() => {
+        toastEl.classList.add('hidden');
+        this._simulateToastTimer = null;
+      }, SIMULATE_TOAST_MS);
+    },
+
+    _formatSimulationToast(summary) {
+      const round = summary.round || '?';
+      if (summary.source === 'bye') return `R${round}: bye (+1)`;
+
+      const opp = summary.opponent
+        ? `${summary.opponent.name}, ${summary.opponent.elo}`
+        : 'unknown opponent';
+      const resultLabel = summary.result === 'win'
+        ? '+1'
+        : summary.result === 'draw'
+          ? '+0.5'
+          : '0';
+      return `R${round}: ${resultLabel} vs ${opp}`;
+    },
+
   };
 
   function _ordinalSuffix(n) {
@@ -765,34 +929,6 @@ const UICareer = (() => {
     if (mod10 === 2 && mod100 !== 12) return 'nd';
     if (mod10 === 3 && mod100 !== 13) return 'rd';
     return 'th';
-  }
-
-  // ── Game end dispatch (free vs tournament) ──────────────
-
-  function _handleGameEnd(result) {
-    if (_mode === 'tournament') {
-      const scoreMap = { win: 1, draw: 0.5, loss: 0 };
-      const score = scoreMap[result] !== undefined ? scoreMap[result] : 0.5;
-      try {
-        TournamentSystem.recordPlayerResult(score);
-      } catch (e) {
-        console.error('[Tournament] recordPlayerResult failed:', e);
-      }
-      // After the post-game status line settles, jump back to the
-      // tournament screen so the player sees the standings update
-      // and either the next pairing or the finished panel.
-      setTimeout(() => {
-        _showScreen('tournament');
-        tournament.render();
-      }, 1500);
-      return;
-    }
-
-    // Free mode: the classic "return to home after 1.5s" behavior
-    setTimeout(() => {
-      _showScreen('home');
-      home.render();
-    }, 1500);
   }
 
   // ── Bindings ──────────────────────────────────────────────
@@ -847,6 +983,15 @@ const UICareer = (() => {
       });
     }
 
+    const btnInbox = document.getElementById('btn-open-inbox');
+    if (btnInbox) {
+      btnInbox.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('inbox');
+        inbox.render();
+      });
+    }
+
     // Lobby → back to home
     const btnLobbyBack = document.getElementById('btn-lobby-back');
     if (btnLobbyBack) {
@@ -857,10 +1002,20 @@ const UICareer = (() => {
       });
     }
 
+    const btnInboxBack = document.getElementById('btn-inbox-back');
+    if (btnInboxBack) {
+      btnInboxBack.addEventListener('click', () => inbox.onBack());
+    }
+
     // Tournament — Play round
     const btnPlayRound = document.getElementById('btn-play-round');
     if (btnPlayRound) {
       btnPlayRound.addEventListener('click', () => tournament.onPlayRound());
+    }
+
+    const btnSimulateRound = document.getElementById('btn-simulate-round');
+    if (btnSimulateRound) {
+      btnSimulateRound.addEventListener('click', () => tournament.onSimulateRound());
     }
 
     // Tournament — Finalize & return home
@@ -877,21 +1032,38 @@ const UICareer = (() => {
       _bindButtons();
       home.render();
 
-      // Wire the UIManager game-end callback to our mode dispatcher
-      // so tournament rounds can be driven from the chess board.
-      if (typeof UIManager !== 'undefined') {
-        UIManager.onGameEnd = (result) => _handleGameEnd(result);
-      }
+      GameEvents.on(GameEvents.EVENTS.GAME_ENDED, (payload) => {
+        setTimeout(() => {
+          if (payload.mode === 'tournament') {
+            _showScreen('tournament');
+            tournament.render();
+            return;
+          }
+          _showScreen('home');
+          home.render();
+        }, 1500);
+      });
+
+      GameEvents.on(GameEvents.EVENTS.TOURNAMENT_FINISHED, () => {
+        _showScreen('home');
+        home.render();
+      });
+
+      GameEvents.on(GameEvents.EVENTS.MAIL_RECEIVED, () => {
+        home.renderInboxBadge();
+        const inboxScreen = document.getElementById('screen-inbox');
+        if (inboxScreen && !inboxScreen.classList.contains('hidden')) {
+          inbox.render();
+        }
+      });
     },
 
     showScreen: _showScreen,
 
     home,
     lobby,
+    inbox,
     tournament,
-
-    getMode: () => _mode,
-    setMode: _setMode,
   };
 
 })();

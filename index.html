@@ -18,10 +18,10 @@
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/daisyui.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
-  <!-- Pixel art font -->
+  <!-- Pixel art font + readable mail body font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/ui.css">
@@ -170,6 +170,7 @@
     <!-- Primary actions -->
     <div class="career-primary-row">
       <button id="btn-browse-tournaments" class="career-primary-btn">🏆 Browse tournaments</button>
+      <button id="btn-open-inbox" class="career-primary-btn">📬 Inbox <span id="career-inbox-badge" class="career-inbox-badge hidden">0</span></button>
     </div>
 
     <!-- Dev / test row (will shrink as Phase C/D/E ship real features) -->
@@ -191,6 +192,42 @@
       <div id="lobby-summary" class="lobby-summary">—</div>
       <div id="lobby-status" class="lobby-status hidden"></div>
       <div id="lobby-cards" class="lobby-cards"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: INBOX
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-inbox" class="hidden">
+    <button id="btn-inbox-back" class="inbox-back-btn" type="button">← Back to home</button>
+
+    <div class="inbox-wrap">
+      <div class="inbox-header">
+        <h1 class="inbox-title">Inbox</h1>
+        <div id="inbox-summary" class="inbox-summary">0 unread</div>
+      </div>
+
+      <div class="inbox-layout">
+        <div class="inbox-list-panel">
+          <div id="inbox-list" class="inbox-list"></div>
+        </div>
+
+        <div class="inbox-pane">
+          <div id="inbox-pane-empty" class="inbox-empty-state hidden">Select a mail to read.</div>
+
+          <div id="inbox-pane-content" class="hidden">
+            <div class="inbox-mail-meta">
+              <div id="inbox-mail-from" class="inbox-mail-from">—</div>
+              <div class="inbox-mail-meta-right">
+                <span id="inbox-mail-tag" class="inbox-mail-tag">—</span>
+                <span id="inbox-mail-date" class="inbox-mail-date">—</span>
+              </div>
+            </div>
+            <div id="inbox-mail-subject" class="inbox-mail-subject">—</div>
+            <div id="inbox-mail-body" class="mail-body-text">—</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -242,7 +279,10 @@
             <div id="t-opp-elo"  class="t-pairing-elo">—</div>
           </div>
         </div>
-        <button id="btn-play-round" class="t-play-btn">▶ Play round</button>
+        <div class="t-next-actions">
+          <button id="btn-play-round" class="t-play-btn">▶ Play round</button>
+          <button id="btn-simulate-round" class="t-sim-btn">⏩ Simulate round</button>
+        </div>
       </div>
 
       <!-- Finished panel (shown after the last round) -->
@@ -271,6 +311,8 @@
       </div>
 
     </div>
+
+    <div id="t-sim-toast" class="t-sim-toast hidden" aria-live="polite"></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
@@ -323,6 +365,10 @@
             ✦ Intuition
           </button>
         </div>
+        <div id="training-bonus-section" class="hidden">
+          <div class="label">Training bonuses</div>
+          <div id="training-bonus-buttons" class="training-bonus-buttons"></div>
+        </div>
         <div id="game-controls">
           <button id="btn-new-game">New game</button>
           <div id="game-status">Start a game to begin.</div>
@@ -332,8 +378,10 @@
       <!-- Center board -->
       <div id="board-section">
         <div id="captured-black"></div>
+        <div id="puzzle-mode-banner" class="hidden">PUZZLE</div>
         <div id="board-container">
           <div id="board"></div>
+          <div id="puzzle-outcome-card" class="hidden">Puzzle solved!</div>
         </div>
         <div id="captured-white"></div>
         <div id="board-nav">
@@ -454,15 +502,22 @@
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
   <script src="js/calendar-system.js"></script>
+  <script src="js/game-events.js"></script>
+  <script src="js/puzzle-data.js"></script>
+  <script src="js/puzzle-system.js"></script>
   <script src="js/tournament-data.js"></script>
   <script src="js/name-pools.js"></script>
   <script src="js/tournament-system.js"></script>
+  <script src="js/career-flow.js"></script>
+  <script src="js/inbox-templates.js"></script>
+  <script src="js/inbox-system.js"></script>
   <script src="js/avatar-data.js"></script>
   <script src="js/dialog-system.js"></script>
   <script src="js/chess-engine.js"></script>
   <script src="js/maia-engine.js"></script>
   <script src="js/review-manager.js"></script>
   <script src="js/ui-manager.js"></script>
+  <script src="js/bonus-system.js"></script>
   <script src="js/ui-career.js"></script>
   <script src="js/character-creator.js"></script>
 

@@ -39,6 +39,9 @@ const UIManager = {
   // Move navigation: null = live mode, otherwise integer ply we're
   // previewing (0 = before any move, history.length = live).
   _viewPly: null,
+  _pieceSource: 'live',
+  _puzzleMode: false,
+  _playbackInputLocked: false,
 
   // Callback fired when a game ends. External code (career flow) can
   // subscribe by setting UIManager.onGameEnd = (result) => {...}.
@@ -106,7 +109,15 @@ const UIManager = {
    * chess.js instance that has replayed the history up to _viewPly.
    */
   _getPieceAccessor() {
-    if (this._viewPly === null) {
+    if (this._pieceSource === 'puzzle' && typeof BonusSystem !== 'undefined') {
+      const puzzleState = BonusSystem.getPuzzleState();
+      if (puzzleState && puzzleState.fen) {
+        const chess = new Chess(puzzleState.fen);
+        return (sq) => chess.get(sq);
+      }
+    }
+
+    if (this._pieceSource === 'live' || this._viewPly === null) {
       return (sq) => ChessEngine.getPiece(sq);
     }
     // Build a temporary Chess by replaying the SAN history
@@ -124,21 +135,34 @@ const UIManager = {
     if (!board) return;
     board.innerHTML = '';
 
-    const isViewing = this._viewPly !== null;
+    const isViewing = this._pieceSource === 'viewPly';
+    const isPuzzle = this._pieceSource === 'puzzle';
     const getPiece  = this._getPieceAccessor();
+    const puzzleState = isPuzzle && typeof BonusSystem !== 'undefined'
+      ? BonusSystem.getPuzzleState()
+      : null;
 
     const isFlipped = ChessEngine.getPlayerColor() === 'b';
     const files = isFlipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
     const ranks = isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
 
-    // In view mode, do not show legal-move hints, check highlight,
-    // or flow highlights — those refer to the live position.
-    const legalTargets   = isViewing ? [] : this.legalMoves.map(m => m.to);
-    const captureTargets = isViewing ? [] : this.legalMoves
-      .filter(m => m.flags.includes('c') || m.flags.includes('e'))
-      .map(m => m.to);
+    let legalTargets = [];
+    let captureTargets = [];
+    let selectedSquare = null;
 
-    const inCheck    = !isViewing && ChessEngine.isInCheck();
+    if (isPuzzle && puzzleState) {
+      legalTargets = puzzleState.legalTargets || [];
+      captureTargets = puzzleState.captureTargets || [];
+      selectedSquare = puzzleState.selectedSquare;
+    } else if (!isViewing) {
+      legalTargets = this.legalMoves.map(m => m.to);
+      captureTargets = this.legalMoves
+        .filter(m => m.flags.includes('c') || m.flags.includes('e'))
+        .map(m => m.to);
+      selectedSquare = this.selectedSquare;
+    }
+
+    const inCheck    = !isViewing && !isPuzzle && ChessEngine.isInCheck();
     const kingSquare = inCheck ? this._findKing(ChessEngine.getTurn()) : null;
 
     ranks.forEach((rank, ri) => {
@@ -151,12 +175,12 @@ const UIManager = {
         el.className      = 'square ' + (isLight ? 'light' : 'dark');
         el.dataset.square = square;
 
-        if (!isViewing && square === this.selectedSquare)                          el.classList.add('selected');
-        if (!isViewing && (this.lastMove?.from === square || this.lastMove?.to === square)) el.classList.add('last-move');
+        if (!isViewing && square === selectedSquare)                               el.classList.add('selected');
+        if (!isViewing && !isPuzzle && (this.lastMove?.from === square || this.lastMove?.to === square)) el.classList.add('last-move');
         if (legalTargets.includes(square) && !captureTargets.includes(square))     el.classList.add('legal-move');
         if (captureTargets.includes(square))                                       el.classList.add('legal-capture');
         if (inCheck && square === kingSquare)                                      el.classList.add('in-check');
-        if (!isViewing && this.flowHighlights.includes(square))                    el.classList.add('flow-highlight');
+        if (!isViewing && !isPuzzle && this.flowHighlights.includes(square))       el.classList.add('flow-highlight');
 
         if (fi === 0) {
           const r = document.createElement('span');
@@ -185,7 +209,7 @@ const UIManager = {
       });
     });
 
-    if (!isViewing) {
+    if (!isViewing && !isPuzzle) {
       this._renderArrow();
       this._renderThreatArrows();
       this._renderCapturedPieces();
@@ -194,9 +218,13 @@ const UIManager = {
       const old = document.getElementById('sf-arrow-img');
       if (old) old.remove();
       document.querySelectorAll('.threat-arrow-img').forEach((e) => e.remove());
+      this._clearCapturedPieces();
     }
 
     this._updateNavUI();
+    if (typeof BonusSystem !== 'undefined' && BonusSystem.renderInventory) {
+      BonusSystem.renderInventory();
+    }
   },
 
   // ── MOVE NAVIGATION ─────────────────────────────────────────
@@ -207,6 +235,18 @@ const UIManager = {
     const prevBtn  = document.getElementById('btn-nav-prev');
     const nextBtn  = document.getElementById('btn-nav-next');
     const liveBtn  = document.getElementById('btn-nav-live');
+
+    if (this._puzzleMode) {
+      if (labelEl) {
+        labelEl.textContent = 'Puzzle';
+        labelEl.classList.add('viewing');
+      }
+      if (startBtn) startBtn.disabled = true;
+      if (prevBtn)  prevBtn.disabled  = true;
+      if (nextBtn)  nextBtn.disabled  = true;
+      if (liveBtn)  liveBtn.disabled  = true;
+      return;
+    }
 
     const total = ChessEngine.getHistory().length;
 
@@ -229,12 +269,15 @@ const UIManager = {
 
   /** Jump to a specific ply (0 = initial position, total = live). */
   _goToPly(ply) {
+    if (this._puzzleMode) return;
     const total = ChessEngine.getHistory().length;
     if (ply < 0) ply = 0;
     if (ply >= total) {
       this._viewPly = null;
+      this._pieceSource = 'live';
     } else {
       this._viewPly = ply;
+      this._pieceSource = 'viewPly';
     }
     this.renderBoard();
   },
@@ -340,7 +383,13 @@ const UIManager = {
   // ── CLICK HANDLING ───────────────────────────────────────────
 
   onSquareClick(square) {
+    if (this._puzzleMode && typeof BonusSystem !== 'undefined') {
+      const handled = BonusSystem.onPuzzleClick(square);
+      this.renderBoard();
+      return handled;
+    }
     if (this._viewPly !== null) return;     // view mode: read-only
+    if (this._playbackInputLocked) return;
     if (ChessEngine.isGameOver()) return;
     if (this._aiThinking) return;
     if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) return;
@@ -434,6 +483,9 @@ const UIManager = {
     this._moveEvals       = {};
     this._moveEvalSquares = {};
     this._viewPly         = null;
+    this._pieceSource     = 'live';
+    this._puzzleMode      = false;
+    this._playbackInputLocked = false;
 
     FocusSystem.resetForGame();
 
@@ -479,6 +531,10 @@ const UIManager = {
     document.getElementById('flow-status').textContent = '';
     document.getElementById('flow-status').className   = 'flow-status';
 
+    if (typeof BonusSystem !== 'undefined' && BonusSystem.renderInventory) {
+      BonusSystem.renderInventory();
+    }
+
     this.renderBoard();
 
     if (playerColor === 'b') {
@@ -516,6 +572,7 @@ const UIManager = {
 
     // Any new move forces the view back to live mode
     this._viewPly       = null;
+    this._pieceSource   = 'live';
     this.lastMove       = { from, to };
     this.selectedSquare = null;
     this.legalMoves     = [];
@@ -702,6 +759,13 @@ const UIManager = {
 
     this._fillCapturedRow(capWhiteEl, playerCaptures, playerDiff > 0 ? playerDiff : 0);
     this._fillCapturedRow(capBlackEl, opponentCaptures, playerDiff < 0 ? -playerDiff : 0);
+  },
+
+  _clearCapturedPieces() {
+    const capWhiteEl = document.getElementById('captured-white');
+    const capBlackEl = document.getElementById('captured-black');
+    if (capWhiteEl) capWhiteEl.innerHTML = '';
+    if (capBlackEl) capBlackEl.innerHTML = '';
   },
 
   _fillCapturedRow(container, pieces, advantage) {
@@ -983,10 +1047,11 @@ const UIManager = {
       }
 
       this._viewPly = null;
+      this._pieceSource = 'live';
       this.lastMove = { from, to };
+      this._aiThinking = false;
       this.renderBoard();
       this.updateMoveHistory();
-      this._aiThinking = false;
 
       if (this._checkGameEnd()) return;
       this.showStatus('Your move.');
@@ -1122,6 +1187,67 @@ const UIManager = {
     if (navLive)  navLive.onclick  = () => this._navLive();
   },
 
+  enterPuzzleMode() {
+    this._puzzleMode = true;
+    this._pieceSource = 'puzzle';
+    this.selectedSquare = null;
+    this.legalMoves = [];
+    this._clearStockfishVisuals();
+    this.renderBoard();
+  },
+
+  exitPuzzleMode() {
+    this._puzzleMode = false;
+    this._pieceSource = this._viewPly === null ? 'live' : 'viewPly';
+    this.selectedSquare = null;
+    this.legalMoves = [];
+    this.renderBoard();
+  },
+
+  lockInputForPlayback() {
+    this._playbackInputLocked = true;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.add('playback-locked');
+    }
+  },
+
+  unlockInputAfterPlayback() {
+    this._playbackInputLocked = false;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove('playback-locked');
+    }
+    this.renderBoard();
+  },
+
+  applyPlaybackMove(move) {
+    if (!move || !move.from || !move.to) return false;
+    const promo = move.promotion || (move.move && move.move[4]) || 'q';
+    const applied = ChessEngine.makeMove(move.from, move.to, promo);
+    if (!applied) return false;
+
+    if (typeof SoundManager !== 'undefined') {
+      if (applied.captured) SoundManager.playCapture();
+      else                  SoundManager.playMove();
+    }
+
+    const ply = ChessEngine.getHistory().length;
+    this._moveEvalSquares[ply] = move.to;
+    this._viewPly = null;
+    this._pieceSource = 'live';
+    this.lastMove = { from: move.from, to: move.to };
+    this.selectedSquare = null;
+    this.legalMoves = [];
+    this._clearStockfishVisuals();
+    this.renderBoard();
+    this.updateMoveHistory();
+
+    return !this._checkGameEnd();
+  },
+
+  async triggerAIMoveAndWait() {
+    await this._triggerAIMove();
+  },
+
 };
 
 // ── BOOTSTRAP ───────────────────────────────────────────────────
@@ -1134,8 +1260,16 @@ window.addEventListener('DOMContentLoaded', () => {
   MaiaEngine.init(); // async — runs in background
   CareerManager.init();
   CalendarSystem.init();
+  CareerFlow.init();
+  InboxSystem.init();
+  PuzzleSystem.init();
   UIManager.init();
-  UICareer.init();          // wires UIManager.onGameEnd itself
+  BonusSystem.init();
+  UIManager.onGameEnd = (result) => CareerFlow.onGameEnd(result);
+  // Ordering matters: CareerFlow must observe TOURNAMENT_FINISHED
+  // before UICareer so the mode flips back to 'free' before home
+  // re-renders.
+  UICareer.init();
   CharacterCreator.init();
 
   // Initial routing: if no character, show the creator. Otherwise
@@ -1147,7 +1281,7 @@ window.addEventListener('DOMContentLoaded', () => {
       UICareer.home.render();
     });
   } else if (CalendarSystem.isInTournament && CalendarSystem.isInTournament()) {
-    UICareer.setMode('tournament');
+    CareerFlow.enterTournamentMode();
     UICareer.showScreen('tournament');
     UICareer.tournament.render();
   } else {

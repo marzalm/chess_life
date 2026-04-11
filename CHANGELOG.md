@@ -9,6 +9,743 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### E.2 playtest fixes round 4: playback deadlock (2026-04-12)
+
+Fourth and final E.2 bugfix pass.
+
+- `_runPlayback` in `js/bonus-system.js` used to early-break after
+  the last budgeted player move, skipping Maia's reply. Control
+  returned with "Your move." while Maia was actually still to
+  move, deadlocking the game.
+- Fixed by removing the mid-loop `if (movesLeft <= 0) break;`
+  and letting every iteration play to completion (player move
+  + Maia reply). The while condition still gates the next
+  iteration on the budget.
+- New regression test in `tests/bonus-system.test.js` verifies
+  that a 2-move budget triggers `triggerAIMoveAndWait()` exactly
+  2 times and that `ChessEngine.getTurn()` returns to the player
+  color at the end of playback.
+
+No file touched outside `bonus-system.js` and its test. All 7
+suites still green at 226 tests.
+
+### E.2 playtest fixes round 3: Lichess FEN setup-move normalization (2026-04-11)
+
+Third focused E.2 bugfix pass. This round fixes the root mismatch
+between shipped puzzle positions and the player’s expected first move
+by normalizing Lichess data at extraction time instead of layering
+runtime special cases on top.
+
+#### 1. Puzzle extraction now ships post-setup positions
+
+- `tools/extract_lichess_puzzles.py` now documents the raw Lichess CSV
+  quirk: `FEN` is the position before the opponent’s setup move
+- the script now loads that raw FEN, applies the first UCI move with
+  `python-chess`, stores the resulting board as the shipped `fen`, and
+  trims `solution` to `moves[1:]`
+- defensive filtering drops any row that cannot produce a playable
+  post-setup puzzle line
+
+#### 2. Color filtering semantics are now correct
+
+- `PuzzleSystem._puzzleTurnColor()` still reads the FEN turn letter,
+  but that turn letter now means “player to move” instead of
+  “opponent setup move to play”
+- same-color filtering in `pickInGamePuzzle(theme, preferredColor)`
+  therefore now matches the live-game player color as intended
+
+#### 3. Starter pool regenerated with normalized FENs
+
+- `js/puzzle-data.js` was regenerated from the normalized extractor
+- the pool remains locked at **176 puzzles total**, **8 per theme**,
+  **5 low / 3 mid**, and **4 white / 4 black**
+- spot-checking the first puzzle of each theme confirms the shipped
+  FENs changed from the previous raw-Lichess positions
+
+#### 4. Regression coverage
+
+- `tests/puzzle-system.test.js` adds a normalization regression test
+  asserting that `pickInGamePuzzle('fork', 'w')` returns a puzzle whose
+  shipped FEN turn letter is white
+- all existing puzzle and bonus tests remain green on the normalized
+  data format
+
+### E.2 playtest fixes round 2 (2026-04-11)
+
+Second focused bugfix pass after browser playtest. This round fixes
+banner layout, puzzle-side consistency, adaptive puzzle rating, and
+adds debug force-resolution hooks for faster validation.
+
+#### 1. Puzzle banner moved out of the board overlay layer
+
+- `#puzzle-mode-banner` is no longer absolutely positioned inside
+  `#board-container`
+- the banner now lives in `#board-section`, between
+  `#captured-black` and the board itself
+- styling switched back to normal document flow, so the first rank is
+  no longer obscured during puzzle mode
+
+#### 2. In-game puzzles now prefer the player’s side
+
+- `PuzzleSystem.pickInGamePuzzle(theme, preferredColor)` now accepts
+  an optional preferred turn color
+- `BonusSystem.invokeBonus(theme)` passes
+  `ChessEngine.getPlayerColor()` through as that preference
+- selection filters fresh theme candidates to matching FEN turn color
+  when possible, but falls back to the full theme pool if the
+  color-matched subset is empty
+- reinforcement queue picks intentionally ignore the color filter:
+  revision stays more important than perspective consistency
+
+#### 3. Adaptive puzzle rating replaces fixed starter targeting
+
+- `CareerManager.training` now persists:
+  - `puzzleRating` (initial **500**)
+  - `puzzleRatingRd` (initial **300**)
+- `PuzzleSystem` adds:
+  - `getPuzzleRating()`
+  - `getPuzzleRatingRd()`
+  - `updatePuzzleRatingAfterAttempt(puzzleDifficulty, success)`
+- the active selection window is now dynamic:
+  `max(150, round(puzzleRatingRd * 1.2))`
+- failures use half-impact rating loss so early mistakes do not crash
+  the learner’s curve
+- self-training sessions and in-game bonus puzzles now both select
+  against this adaptive puzzle rating instead of the player’s chess Elo
+
+#### 4. Starter pool recalibrated again for comfort and side coverage
+
+- `tools/extract_lichess_puzzles.py` now builds **176** puzzles total
+- locked mix per theme:
+  - **8 puzzles**
+  - **5 low (600-999)**
+  - **3 mid (1000-1299)**
+  - **4 white-to-play / 4 black-to-play**
+- puzzles above `1299` are removed from the starter pool
+- regenerated `js/puzzle-data.js` verifies every theme at:
+  `total=8 low=5 mid=3 white=4 black=4`
+
+#### 5. Debug force-resolution helpers
+
+- new `BonusSystem.debugForcePuzzleSuccess()`
+- new `BonusSystem.debugForcePuzzleFailure()`
+
+These are explicitly debug-only and callable from `cl.bonus` in the
+devtools console to validate success/failure resolution flows without
+solving the puzzle manually.
+
+#### Tests
+
+- `tests/puzzle-system.test.js` expands to cover:
+  preferred color filtering, color-filter fallback, initial puzzle
+  rating/RD, adaptive rating updates, RD convergence, rating clamps,
+  and dynamic-window behavior
+- `tests/bonus-system.test.js` stays aligned with the one-button
+  inventory model and the new `pickInGamePuzzle(theme, preferredColor)`
+  call path
+- all **7** suites remain green after the round-two fixes
+
+### E.2 bugfix pass (2026-04-11)
+
+Targeted post-playtest fixes for the first training-bonus release.
+No new Phase E scope was added; this pass only corrects inventory UX,
+AI-turn button timing, puzzle-banner visibility, and starter-pool
+calibration.
+
+#### 1. Training bonus button no longer leaks theme names
+
+- sidebar inventory now shows **one** generic training-bonus button:
+  `Training bonus (N)`
+- `N` is the total count across all stored training themes
+- new `BonusSystem.invokeNextAvailableTrainingBonus()` picks the theme
+  with the highest current charge count, breaking ties by
+  alphabetical theme key
+- the actual theme is now revealed only in puzzle mode
+  (banner + outcome card), not in the sidebar button label
+
+#### 2. Bonus button enable race after Maia move fixed
+
+- in `UIManager._triggerAIMove()`, `_aiThinking = false` now happens
+  **before** `renderBoard()` and `updateMoveHistory()`
+- this fixes the stale disabled-state render where training bonuses
+  stayed grayed out until the next player interaction
+- regression coverage was added in `tests/bonus-system.test.js`
+
+#### 3. Puzzle banner no longer clips above the board
+
+- `#puzzle-mode-banner` moved from a negatively positioned strip above
+  the board to a full-width overlay at the top of `#board-container`
+- this keeps the banner fully visible across themes and avoids the
+  “small gold fragment” clipping seen in playtest screenshots
+
+#### 4. Starter pool recalibrated for real beginner players
+
+- `tools/extract_lichess_puzzles.py` now enforces the locked beginner
+  mix of **3 low / 2 mid / 0 high** per theme
+- difficulty bands changed to:
+  `600-999`, `1000-1299`, `1300-1499`
+- puzzles above `1499` are excluded entirely from the shipped starter pool
+- `js/puzzle-data.js` was regenerated from real Lichess data with the new
+  bands, keeping **110 total puzzles** and verifying each theme at
+  `low=3, mid=2, high=0`
+
+#### Tests
+
+- `tests/bonus-system.test.js` updated for the one-button inventory model
+  and the Maia-turn enable-order regression
+- `tests/puzzle-system.test.js` updated for the new beginner-weighted
+  selection expectations
+- all **7** suites remain green after the bugfix pass
+
+### Phase E.2 — In-game training bonus path (2026-04-11)
+
+E.2 turns the Phase E training layer into a live game mechanic:
+stored training bonuses can now be invoked during the player's turn,
+the real game suspends into puzzle mode, and success grants a short
+Stockfish takeover on the real board.
+
+#### `bonus-system.js`
+
+New orchestration module for the in-game bonus flow:
+
+- `init()`
+- `getInventory()`
+- `canInvokeBonus(theme)`
+- `invokeBonus(theme)`
+- `isInPuzzleMode()`
+- `isPlaybackActive()`
+- `getPuzzleState()`
+- `onPuzzleClick(square)`
+- `resolvePuzzleFailure()`
+- `resolvePuzzleSuccess()`
+- `getRewardMoveCount(theme)`
+
+Responsibilities are deliberately split:
+
+- `BonusSystem` owns runtime puzzle/playback state and UI coordination
+- `PuzzleSystem` remains the only writer to `CareerManager.training`
+- `ChessEngine` stays untouched
+
+E.2 also locks the alternating-line Lichess behavior:
+opponent replies inside the puzzle solution auto-play on the temporary
+board after `PUZZLE_OPPONENT_DELAY_MS = 500`, and a puzzle resolves
+only once the **full** solution line has been consumed.
+
+#### `puzzle-system.js` extensions
+
+Two new public methods support in-game invocation without breaking the
+training-domain ownership rule:
+
+- `pickInGamePuzzle(theme)`
+- `consumeTrainingBonus(theme)`
+
+`pickInGamePuzzle(theme)` is reinforcement-first, falls back to
+rating-matched / unseen selection, marks the chosen puzzle as seen,
+and persists before returning. `consumeTrainingBonus(theme)` is the
+single canonical decrement path for stored training charges.
+
+#### `focus-system.js` playback pause
+
+E.2 adds:
+
+- `pauseForPlayback()`
+- `resumeFromPlayback()`
+
+with an internal `_playbackPaused` guard. During post-puzzle Stockfish
+playback, Focus mutations short-circuit so no gauge loss, gain, Flow
+progression, or other reactive side effects leak through the automated
+move sequence.
+
+#### UI and board transformation
+
+The game screen gains a visible training-bonus entry point and a
+distinct puzzle presentation without adding a new screen:
+
+- new sidebar panel under Stockfish: `Training bonuses`
+- one visible button per stored theme charge, e.g. `Use Fork (2)`
+- panel hidden when inventory is empty
+- buttons stay visible but disabled when invocation is not legal
+- puzzle-mode banner above the board:
+  `PUZZLE — [Theme] — Solve to activate`
+- outcome card overlay for `1500ms` with locked copy:
+  `Puzzle solved! +N Stockfish moves` / `Puzzle failed. No reward.`
+- board transformation uses the existing game screen, with puzzle-mode
+  styling on the board container rather than a modal or route change
+
+#### `ui-manager.js` integration
+
+`UIManager` now supports a third board source:
+
+- `_pieceSource = 'live' | 'viewPly' | 'puzzle'`
+
+and routes square clicks to `BonusSystem.onPuzzleClick()` whenever
+`_puzzleMode` is active. E.2 also adds the thin playback hooks that the
+bonus loop needs:
+
+- `enterPuzzleMode()`
+- `exitPuzzleMode()`
+- `lockInputForPlayback()`
+- `unlockInputAfterPlayback()`
+- `applyPlaybackMove(move)`
+- `triggerAIMoveAndWait()`
+
+#### Tests
+
+- `tests/puzzle-system.test.js` grows from **20** to **22** tests
+- new `tests/bonus-system.test.js` adds **19** tests
+- coverage includes inventory gating, puzzle-mode entry/exit,
+  exact-UCI validation, auto-played opponent replies, single-move
+  termination, reward-count computation, playback sequencing,
+  game-end exit, Focus pause integration, and `bonus_invoked` /
+  `bonus_resolved` payloads
+- total suite count rises from **193** to **214**
+
+#### Non-goals preserved
+
+E.2 intentionally does **not** ship:
+
+- Flow bonuses
+- coaches or coach quality multipliers
+- a coach browser / finance UI
+- a separate puzzle screen
+- `cancelPuzzle()`
+- playback skip / interrupt
+- any change to `chess-engine.js`
+
+### Phase E.1 — Puzzle foundation (2026-04-11)
+
+Phase E starts with the non-UI training core: real puzzle data,
+player-owned training persistence, self-training sessions, aptitude
+growth, and Lucas-Chess-style reinforcement queues.
+
+#### Real Lichess starter pool
+
+- new `tools/extract_lichess_puzzles.py`
+- streams the official Lichess puzzle dump (or reads a local CSV / zst)
+- filters to the 22 locked Phase E theme keys
+- writes `js/puzzle-data.js` as committed static data
+- starter pool ships with **110 real puzzles**:
+  exactly **5 per theme**, stratified as `2 low / 2 mid / 1 high`
+  across the `800-1200`, `1200-1600`, and `1600-2000` bands
+
+#### `puzzle-system.js`
+
+New pure logic module with no DOM:
+
+- `startSelfTrainingSession(theme, options)`
+- `submitSessionAnswer(sessionId, solved)`
+- `completeSession(sessionId)`
+- aptitude getters / bonus-count getters / reinforcement getters
+
+E.1 scope is explicit in code comments and JSDoc:
+`submitSessionAnswer` trusts a caller-provided boolean and does **not**
+validate chess moves yet. Real move/FEN validation is deferred to E.2.
+
+#### Training persistence
+
+`career-manager.js` gains a new `training` domain with persisted:
+
+- `aptitudes`
+- `seenPuzzleIds`
+- `reinforcementQueues`
+- `trainingBonuses`
+- `flowBonus`
+- `stats`
+
+Progress is player-owned: changing coach later must not wipe training
+progress, seen puzzles, queued revisions, or earned bonuses.
+
+#### Reinforcement and aptitude
+
+- failed puzzles enter a theme-scoped reinforcement queue
+- reinforcement puzzles are served before fresh ones
+- exit rule is locked at **N = 2**:
+  one solve → `pending-confirmation`, second solve in a later session
+  removes the puzzle, failure resets it to `active`
+- E.1 aptitude formula is:
+  `min(100, floor(solvedThemePuzzles * 1.5 + reinforcedResolves * 2))`
+
+#### Tests
+
+- new `tests/puzzle-system.test.js` with **20** tests
+- covers theme catalog, seen tracking, reinforcement priority,
+  `pending-confirmation`, N=2 exit, session pass/fail rewards,
+  aptitude growth/cap, persistence, and the explicit E.1 trust boundary
+- total suite count rises from **173** to **193**
+
+#### Non-goals preserved
+
+E.1 intentionally ships **no** coach UI, no in-game bonus invocation,
+no Flow integration, no puzzle board mode, and no Stockfish playback.
+Those begin in E.2-E.4.
+
+### Feature: Simulate round button (2026-04-11)
+
+Phase D made tournament consequences easier to inspect; this feature
+cuts out the remaining grind during the tournament itself. The player
+can now skip a round from the in-tournament screen and get an
+algorithmic result immediately, which helps both rapid testing and
+"filler tournament" pacing in normal play.
+
+#### Tournament logic
+
+- new `TournamentSystem.simulatePlayerRound()`
+- player simulations reuse the existing Elo probability model shape
+  with a named `SIMULATION_PLAYER_PENALTY = 50` applied to the
+  player's effective Elo before the roll
+- simulated rounds count as real career games:
+  `CareerManager.history.recordGame()` is called, so Elo still moves
+- `recordPlayerResult()` now emits `round_played` for every player
+  round resolution with `source: 'board' | 'simulated' | 'bye'`
+
+Bye semantics are explicit:
+
+- no Elo roll
+- direct `+1`
+- no Flow strip / Focus hook
+- `round_played.source = 'bye'`
+
+#### Focus interaction
+
+New public `FocusSystem.onRoundSimulated()` strips momentum using the
+existing Flow-exit path only:
+
+- `consecutiveGoodMoves = 0`
+- `_exitFlow()` removes Flow State
+- `current` is left untouched
+
+This keeps Focus logic fully owned by `focus-system.js` and avoids
+inventing a second between-round reset rule.
+
+#### UI
+
+The in-tournament "Next round" card now offers two actions:
+
+- `▶ Play round`
+- `⏩ Simulate round`
+
+A short non-blocking toast confirms the simulated result (`900ms`,
+replacement-friendly) so test loops can click through many rounds
+without waiting on an animation stack.
+
+#### Tests
+
+- `tests/tournament-system.test.js` gained simulation coverage:
+  progression, emitted payloads, Focus hook, bye behavior,
+  finalize-after-sim, and a seeded 200-trial distribution check
+- total suite count rises from **164** to **173**
+
+### Phase D.2 — Inbox screen UI (2026-04-11)
+
+Phase D.1 made mails real. Phase D.2 makes them visible with a proper
+mail-reader screen instead of keeping them as hidden state.
+
+#### New inbox screen
+
+New `#screen-inbox` in `index.html`, following the existing
+`screen-${name}` routing pattern in `ui-career.js`.
+
+Layout:
+
+- fixed `← Back to home` button (same navigation language as lobby)
+- centered header: `Inbox` + unread count only (`N unread`)
+- two-column reader on desktop:
+  - left = mail list
+  - right = reading pane
+- responsive fallback stacks the columns on narrow screens
+
+The reading pane automatically selects the newest mail when opening
+the inbox. Opening a mail marks it as read through `InboxSystem`.
+
+#### Home screen integration
+
+- new primary action button on the home screen:
+  `📬 Inbox`
+- unread badge rendered inline next to the label
+- `UICareer.home.renderInboxBadge()` reads
+  `InboxSystem.getUnreadCount()`
+- `UICareer.init()` subscribes to `mail_received` and refreshes only
+  the badge in place instead of doing a full `home.render()`
+
+If the inbox screen is currently visible when a new mail arrives,
+the mail list/pane also re-render immediately.
+
+#### `UICareer.inbox` sub-namespace
+
+Added to `js/ui-career.js` as presentation-only UI:
+
+- `render()`
+- `onOpenMail(id)`
+- `onBack()`
+- private render helpers for the list, pane, and empty states
+
+Canonical state stays in `InboxSystem`; the UI layer only tracks the
+currently selected mail id.
+
+#### Typography and styling
+
+The inbox shell stays in `Press Start 2P`, matching the rest of the
+career UI:
+
+- header
+- mail list rows
+- subject line
+- from/date labels
+- tag pill
+- buttons
+
+The **mail body only** switches to `VT323` for readability. This keeps
+the retro feel without turning 3-sentence press articles into pixel
+soup.
+
+Visual cues:
+
+- unread rows = brighter border / stronger contrast
+- read rows = slightly muted
+- selected row = gold accent highlight
+- tag pill in the reading pane (`press`, `federation`)
+- empty state copy:
+  `No mail. Play a tournament to see the press react.`
+
+#### Scope intentionally left out
+
+Not shipped in D.2:
+
+- tag filtering
+- pagination
+- clickable mail actions
+- delete / mark-unread UI affordances
+
+`InboxSystem.delete()` and `markUnread()` remain logic-layer APIs, but
+the D.2 inbox behaves as a career archive, not a productivity mail
+client.
+
+#### Tests
+
+No dedicated `ui-career-inbox` Node test was added. The screen is still
+rendered in direct DOM style inside `ui-career.js`, so there is no clean
+pure helper worth isolating yet.
+
+Regression baseline remains green:
+
+- 53 calendar
+- 26 tournament-data
+- 55 tournament-system
+- 10 game-events
+- 20 inbox-system
+
+Total: **164 tests green**.
+
+---
+
+### Phase D.1 — Inbox data, templates, and event-driven mail generation (2026-04-11)
+
+First real consumer of the D.0 event seam. Inbox mails now exist as
+persisted game artifacts in `CareerManager.inbox.mails`, generated by
+pure template data plus a DOM-free logic layer.
+
+#### New module — `js/inbox-templates.js`
+
+Pure data dictionary keyed by `templateId`, each entry exposing:
+
+- `from`
+- `subject`
+- `body`
+- `tag`
+- optional `actions` (reserved for D.2 UI dispatch, not wired yet)
+
+Phase D.1 ships four baseline templates:
+
+- `press_tournament_win`
+- `press_tournament_top3`
+- `press_tournament_disappointing`
+- `federation_elo_confirmation`
+
+Templates use `{{var}}` substitution markers and stay intentionally
+short: headline + compact lede, closer to FM inbox copy than long-form
+article prose.
+
+#### New module — `js/inbox-system.js`
+
+Public logic API:
+
+- `InboxSystem.init()`
+- `InboxSystem.push(templateId, vars?, options?)`
+- `InboxSystem.getAll()`
+- `InboxSystem.getById(id)`
+- `InboxSystem.getUnreadCount()`
+- `InboxSystem.markRead(id)` / `markUnread(id)`
+- `InboxSystem.delete(id)`
+- `InboxSystem.clear()` (tests only)
+
+Key behaviors:
+
+- `push()` resolves the template, substitutes `{{var}}` markers, and
+  persists a mail row shaped as
+  `{ id, templateId, date, from, subject, body, read, tag, actions? }`
+- missing vars render as `???` instead of throwing
+- mail dates use the **in-game calendar date** by default:
+  `options.date || CalendarSystem.getDate()`
+- `getAll()` sorts newest first with `CalendarSystem.compareDates()`
+  and never touches wall-clock `Date()`
+- after persisting and saving, `push()` emits
+  `GameEvents.EVENTS.MAIL_RECEIVED` with
+  `{ mailId, templateId, vars, date, tag }`
+
+#### Event-driven auto-mail
+
+`InboxSystem.init()` wires **two** subscribers to
+`GameEvents.EVENTS.TOURNAMENT_FINISHED`:
+
+- one schedules a press mail (win / podium / disappointing result)
+- one schedules a federation rating-confirmation mail
+
+Both handlers defer their `push()` call with `queueMicrotask(...)`
+instead of emitting during the original handler execution, following
+the D.0 "no re-emit inside handlers" discipline rule.
+
+This means every finished tournament now produces two mails without
+coupling `tournament-system.js` to `inbox-system.js`.
+
+#### Tournament payload extension
+
+`TournamentSystem.startTournament()` now stores the player's Elo at the
+start of the event on the live tournament instance. `finalize()` emits
+a richer `tournament_finished` payload:
+
+- previous fields unchanged
+- `eloBefore`
+- `eloAfter`
+- `date` now stored as an in-game `CalendarDate`, not a wall-clock ISO
+  timestamp
+
+The standalone tournament-system test harness now injects a `GameEvents`
+mock and asserts that the emitted payload includes the Elo fields.
+
+#### Supporting integration
+
+- `CareerManager.inbox.get()` added as the canonical public accessor
+  for inbox state
+- `index.html` loads `inbox-templates.js` and `inbox-system.js`
+- bootstrap now calls `InboxSystem.init()` after `CareerFlow.init()`
+  and before `UICareer.init()`
+
+#### Tests
+
+- `tests/inbox-system.test.js` added with **20** tests covering:
+  push/persist, in-game date invariant, sorting, read/unread/delete,
+  template substitution, missing vars, `MAIL_RECEIVED` emission,
+  init guard, and auto-mail generation from `TOURNAMENT_FINISHED`
+- `tests/tournament-system.test.js` gains **1** new test for the
+  enriched emit payload
+
+Total: **164 tests green** (53 calendar + 26 tournament-data +
+55 tournament-system + 10 game-events + 20 inbox-system)
+
+---
+
+### Phase D.0 — Event bus and career flow extraction (2026-04-11)
+
+The review pass run at the end of C.4 confirmed that the seams were
+already cracking before Inbox work even started. Two concrete examples
+motivated a minimal D.0:
+
+- `UICareer._handleGameEnd` had become a cross-domain orchestrator
+  living in a UI module (`_mode = 'free' | 'tournament'`, result
+  dispatch, delayed screen transitions)
+- `TournamentSystem.finalize()` was one Inbox listener away from
+  needing a direct cross-domain coupling (`tournament-system` →
+  `inbox-system`) or a worse "UI as orchestrator" workaround
+
+Instead of a larger rewrite, D.0 adds a tiny synchronous event seam
+and extracts the game-flow state out of `ui-career.js`.
+
+#### New module — `js/game-events.js`
+
+Minimal synchronous pub/sub bus:
+
+- `GameEvents.on(eventName, handler)` → unsubscribe function
+- `GameEvents.off(eventName, handler)`
+- `GameEvents.emit(eventName, payload)`
+- `GameEvents.clear(eventName?)`
+
+Implementation: one `Map<eventName, Set<handler>>`, synchronous
+handler execution in registration order, per-handler `try/catch` so
+one bad subscriber does not break the chain.
+
+`GameEvents.EVENTS` is now the source of truth for cross-domain event
+names and payload shapes:
+
+- `tournament_finished` — `{ tournamentId, tournamentName, city, country, startDate, rounds, rank, of, score, prize, date }`
+- `round_played` — `{ tournamentId, round, opponent, result, score, standings? }`
+- `game_ended` — `{ result: 'win'|'draw'|'loss', mode: 'free'|'tournament', opponentId?, opponentElo? }`
+- `elo_changed` — `{ before, after, delta, source, opponentElo? }`
+- `mail_received` — `{ mailId, templateId, vars?, date? }`
+
+Discipline rule documented at the top of the file:
+
+- handlers must **not** emit a new event during their own execution
+  (avoid synchronous reentrancy); defer follow-up emits via
+  `queueMicrotask` or `setTimeout(..., 0)`
+
+#### New module — `js/career-flow.js`
+
+Extracts the cross-cutting flow state from `ui-career.js`.
+
+Public API:
+
+- `CareerFlow.init()`
+- `CareerFlow.getMode()`
+- `CareerFlow.enterTournamentMode()`
+- `CareerFlow.exitTournamentMode()`
+- `CareerFlow.onGameEnd(result)`
+
+Responsibilities:
+
+- owns the current career mode (`'free' | 'tournament'`)
+- manages the `body.in-tournament` class
+- subscribes to `tournament_finished` in `init()` and flips mode back
+  to `'free'`
+- on game end, records the tournament round when relevant, then emits
+  `game_ended`; it does **not** render UI
+
+An init guard prevents double subscription.
+
+#### Re-wiring
+
+- `UIManager.onGameEnd` now points to `CareerFlow.onGameEnd`
+- `UICareer.init()` now subscribes to:
+  - `game_ended` → 1.5 s delayed re-render to tournament or home
+  - `tournament_finished` → immediate return to the home screen
+- `TournamentSystem.finalize()` keeps its direct finance/history
+  writes, then emits `tournament_finished`
+- That emit is guarded with `typeof GameEvents !== 'undefined'` so the
+  existing standalone Node test harness for `tournament-system.js`
+  stays compatible without new dependency injection
+
+#### Tests
+
+- New suite: `tests/game-events.test.js`
+- 10 tests covering subscribe/emit, ordering, unsubscribe,
+  error-isolation, and `clear(eventName)` / `clear()`
+- Total: **143 tests green** (53 calendar + 26 tournament-data +
+  54 tournament-system + 10 game-events)
+
+#### Known debt (noted for D.1)
+
+- `career-flow.js` currently reads `UIManager._opponentId` and
+  `UIManager._opponentElo` directly; add a public
+  `UIManager.getCurrentOpponent()` snapshot API when D.1/D.2 need
+  richer payloads
+- Both `CareerFlow` and `UICareer` subscribe to `tournament_finished`;
+  bootstrap order currently matters because `CareerFlow.init()` must
+  run before `UICareer.init()`
+- `UICareer.tournament.onFinalize()` still writes the
+  `#career-continue-status` line imperatively; acceptable for D.0
+  because it is DOM-only, not orchestration
+
+---
+
 ### Phase C.4 — Playtest polish (2026-04-11)
 
 Playtest round after C.3b surfaced a real bug and several UX gaps.

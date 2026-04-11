@@ -656,10 +656,12 @@
 .career-primary-row {
   display: flex;
   justify-content: center;
+  gap: 12px;
   margin-top: 4px;
   margin-bottom: 12px;
   width: 100%;
   max-width: 720px;
+  flex-wrap: wrap;
 }
 
 .career-primary-btn {
@@ -683,6 +685,242 @@
 
 .career-primary-btn:active {
   transform: translate(2px, 2px);
+}
+
+.career-inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  font-size: 9px;
+  color: var(--px-bg);
+  background: var(--px-text);
+  border: 2px solid var(--px-gold);
+}
+
+.career-inbox-badge.hidden {
+  display: none;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   INBOX SCREEN
+   ════════════════════════════════════════════════════════════════ */
+
+#screen-inbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 16px 40px;
+  min-height: 100vh;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--px-text);
+}
+
+.inbox-back-btn {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 6px 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+.inbox-back-btn:hover {
+  background: var(--px-panel-dark);
+  color: var(--px-accent);
+}
+
+.inbox-wrap {
+  width: 100%;
+  max-width: 1080px;
+}
+
+.inbox-header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.inbox-title {
+  font-size: 16px;
+  color: var(--px-accent);
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+.inbox-summary {
+  font-size: 9px;
+  color: var(--px-text-dim);
+}
+
+.inbox-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.inbox-list-panel,
+.inbox-pane {
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset  1px  1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.35);
+}
+
+.inbox-list-panel {
+  min-height: 560px;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.inbox-list-row {
+  width: 100%;
+  text-align: left;
+  background: var(--px-panel-dark);
+  border: 2px solid var(--px-border);
+  color: var(--px-text);
+  padding: 12px 12px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-list-row.unread {
+  border-color: var(--px-accent);
+  box-shadow: inset 0 0 0 1px rgba(232, 201, 138, 0.25);
+}
+
+.inbox-list-row.read {
+  opacity: 0.82;
+}
+
+.inbox-list-row.selected {
+  background: var(--px-accent);
+  color: var(--px-bg);
+}
+
+.inbox-list-row:hover {
+  transform: translate(-1px, -1px);
+}
+
+.inbox-list-row.selected .inbox-list-date,
+.inbox-list-row.selected .inbox-list-from {
+  color: rgba(26,26,46,0.8);
+}
+
+.inbox-list-subject {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.inbox-list-from,
+.inbox-list-date {
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
+.inbox-pane {
+  min-height: 560px;
+  padding: 18px 20px;
+}
+
+.inbox-mail-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.inbox-mail-from {
+  font-size: 9px;
+  color: var(--px-text-dim);
+}
+
+.inbox-mail-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inbox-mail-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font-size: 8px;
+  text-transform: uppercase;
+  background: var(--px-panel-dark);
+  border: 2px solid var(--px-border);
+  color: var(--px-accent);
+}
+
+.inbox-mail-date {
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
+.inbox-mail-subject {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--px-accent);
+  margin-bottom: 16px;
+}
+
+.mail-body-text {
+  font-family: 'VT323', 'Courier New', monospace;
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--px-text);
+  white-space: pre-wrap;
+}
+
+.inbox-empty-state {
+  min-height: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--px-text-dim);
+  padding: 24px;
+}
+
+@media (max-width: 860px) {
+  .inbox-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .inbox-list-panel,
+  .inbox-pane {
+    min-height: auto;
+  }
+
+  .inbox-list {
+    max-height: 320px;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -1100,6 +1338,67 @@
 
 .t-play-btn:hover { transform: translate(-1px, -1px); }
 .t-play-btn:active { transform: translate(2px, 2px); }
+
+.t-next-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.t-sim-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  background: var(--px-panel-dark);
+  color: var(--px-accent);
+  border: 3px solid var(--px-border);
+  padding: 12px 0;
+  cursor: pointer;
+  width: 100%;
+  box-shadow:
+    inset  1px  1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    3px 3px 0 rgba(0,0,0,0.4);
+}
+
+.t-sim-btn:hover { transform: translate(-1px, -1px); }
+.t-sim-btn:active { transform: translate(2px, 2px); }
+
+.t-sim-toast {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  z-index: 60;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 10px 14px;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--px-text);
+  background: rgba(15, 18, 24, 0.96);
+  border: 3px solid var(--px-gold);
+  box-shadow:
+    inset  1px  1px 0 var(--px-border-hi),
+    inset -1px -1px 0 rgba(0,0,0,0.4),
+    4px 4px 0 rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+
+.t-sim-toast.hidden { display: none; }
+
+@media (max-width: 900px) {
+  .t-next-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .t-sim-toast {
+    right: 14px;
+    left: 14px;
+    bottom: 14px;
+    max-width: none;
+    min-width: 0;
+  }
+}
 
 /* Finished panel */
 

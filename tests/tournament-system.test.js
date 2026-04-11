@@ -24,6 +24,8 @@ let _calendarState;
 let _historyState;
 let _scheduledEvents;
 let _saveCount;
+let _emittedEvents;
+let _focusSimulatedCalls;
 
 function resetMocks() {
   _player = {
@@ -44,10 +46,22 @@ function resetMocks() {
   _historyState = { games: [], tournaments: [], trophies: [] };
   _scheduledEvents = [];
   _saveCount = 0;
+  _emittedEvents = [];
+  _focusSimulatedCalls = 0;
 }
 
 const CareerManager = {
-  player: { get: () => _player },
+  player: {
+    get: () => _player,
+    updateElo: (score, opponentElo) => {
+      const elo = _player.elo;
+      const E = 1 / (1 + 10 ** ((opponentElo - elo) / 400));
+      const K = elo < 2400 ? 32 : 16;
+      const delta = Math.round(K * (score - E));
+      _player.elo = Math.max(100, elo + delta);
+      return delta;
+    },
+  },
   finances: {
     get: () => _finances,
     addExpense: (amount) => {
@@ -60,7 +74,24 @@ const CareerManager = {
     },
   },
   calendar: { get: () => _calendarState },
-  history:  { get: () => _historyState },
+  history:  {
+    get: () => _historyState,
+    recordGame: (entry) => {
+      const scoreMap = { win: 1, draw: 0.5, loss: 0 };
+      const eloBefore = _player.elo;
+      const delta = CareerManager.player.updateElo(scoreMap[entry.result], entry.opponentElo);
+      _historyState.games.push({
+        opponentName: entry.opponentName,
+        opponentElo: entry.opponentElo,
+        result: entry.result,
+        moves: entry.moves || 0,
+        eloBefore,
+        eloAfter: _player.elo,
+        delta,
+      });
+      return delta;
+    },
+  },
   save: () => { _saveCount += 1; },
 };
 
@@ -98,6 +129,22 @@ const CalendarSystem = {
   getAllEvents: () => _scheduledEvents.slice(),
 };
 
+const GameEvents = {
+  EVENTS: {
+    TOURNAMENT_FINISHED: 'tournament_finished',
+    ROUND_PLAYED: 'round_played',
+  },
+  emit: (eventName, payload) => {
+    _emittedEvents.push({ eventName, payload });
+  },
+};
+
+const FocusSystem = {
+  onRoundSimulated: () => {
+    _focusSimulatedCalls += 1;
+  },
+};
+
 // Backward-compat alias for the C.2a tests that referenced _calendarToday
 function _setCalendarToday(date) {
   _calendarState.date = { ...date };
@@ -110,9 +157,9 @@ const sysCode = fs.readFileSync(
   'utf8',
 );
 const TournamentSystem = (new Function(
-  'TournamentData', 'CareerManager', 'CalendarSystem',
+  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem',
   `${sysCode}\nreturn TournamentSystem;`,
-))(TournamentData, CareerManager, CalendarSystem);
+))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem);
 
 // ── Tiny test runner ──────────────────────────────────────────
 
@@ -647,6 +694,171 @@ test('invalid score throws', () => {
   assert(threw, 'expected throw on invalid score');
 });
 
+test('recordPlayerResult emits round_played with source board', () => {
+  TournamentSystem.startTournament(_samplePayload('local_weekend_open'));
+  TournamentSystem.recordPlayerResult(1);
+
+  const ev = _emittedEvents.find((e) => e.eventName === GameEvents.EVENTS.ROUND_PLAYED);
+  assert(ev, 'expected round_played event');
+  assertEq(ev.payload.source, 'board');
+  assertEq(ev.payload.result, 'win');
+});
+
+console.log('\n── simulatePlayerRound ──');
+
+function _setSingleRoundTournament(opponentElo = 1500, pairingColor = 'w') {
+  const playerEntry = {
+    id: 'player',
+    name: 'Tester',
+    elo: _player.elo,
+    nationality: 'NO',
+    isPlayer: true,
+    score: 0,
+    opponentsFaced: [],
+  };
+  const oppEntry = {
+    id: 'opp_1',
+    name: 'Jakub Novak',
+    elo: opponentElo,
+    nationality: 'CZ',
+    isPlayer: false,
+    score: 0,
+    opponentsFaced: [],
+  };
+  const pairing = pairingColor === 'w'
+    ? { white: playerEntry, black: oppEntry }
+    : { white: oppEntry, black: playerEntry };
+
+  _calendarState.currentTournament = {
+    tournamentId: 'local_weekend_open',
+    tournamentName: 'Local Weekend Open',
+    city: 'Oslo',
+    country: 'NO',
+    startDate: { year: 2026, month: 4, day: 11 },
+    playerEloStart: _player.elo,
+    rounds: 1,
+    daysDuration: 2,
+    entryFee: 10,
+    prizes: [200, 100, 50],
+    field: [playerEntry, oppEntry],
+    currentRound: 1,
+    currentPairings: [pairing],
+    history: [],
+  };
+  _calendarState.phase = 'in_tournament';
+}
+
+function _setByeTournament() {
+  const playerEntry = {
+    id: 'player',
+    name: 'Tester',
+    elo: _player.elo,
+    nationality: 'NO',
+    isPlayer: true,
+    score: 0,
+    opponentsFaced: [],
+  };
+  _calendarState.currentTournament = {
+    tournamentId: 'local_weekend_open',
+    tournamentName: 'Local Weekend Open',
+    city: 'Oslo',
+    country: 'NO',
+    startDate: { year: 2026, month: 4, day: 11 },
+    playerEloStart: _player.elo,
+    rounds: 1,
+    daysDuration: 2,
+    entryFee: 10,
+    prizes: [200, 100, 50],
+    field: [playerEntry],
+    currentRound: 1,
+    currentPairings: [{ white: playerEntry, black: null }],
+    history: [],
+  };
+  _calendarState.phase = 'in_tournament';
+}
+
+test('simulatePlayerRound advances the tournament and returns a summary', () => {
+  _setSingleRoundTournament();
+  const result = TournamentSystem.simulatePlayerRound();
+  assertEq(result.ok, true);
+  assertEq(result.finished, true);
+  assertEq(result.source, 'simulated');
+  assert(result.result === 'win' || result.result === 'draw' || result.result === 'loss');
+  assertEq(result.round, 1);
+});
+
+test('simulatePlayerRound records a real career game and archives it', () => {
+  _setSingleRoundTournament(1500);
+  TournamentSystem.simulatePlayerRound();
+  assertEq(_historyState.games.length, 1);
+  assertEq(_historyState.games[0].opponentName, 'Jakub Novak');
+});
+
+test('simulatePlayerRound emits round_played with source simulated', () => {
+  _setSingleRoundTournament();
+  TournamentSystem.simulatePlayerRound();
+  const ev = _emittedEvents.find((e) => e.eventName === GameEvents.EVENTS.ROUND_PLAYED);
+  assert(ev, 'expected round_played event');
+  assertEq(ev.payload.source, 'simulated');
+  assertEq(ev.payload.opponent.name, 'Jakub Novak');
+});
+
+test('simulatePlayerRound strips flow via FocusSystem hook', () => {
+  _setSingleRoundTournament();
+  TournamentSystem.simulatePlayerRound();
+  assertEq(_focusSimulatedCalls, 1);
+});
+
+test('simulatePlayerRound bye path gives full point and tags source as bye', () => {
+  _setByeTournament();
+  const result = TournamentSystem.simulatePlayerRound();
+  const ev = _emittedEvents.find((e) => e.eventName === GameEvents.EVENTS.ROUND_PLAYED);
+  assertEq(result.source, 'bye');
+  assertEq(result.score, 1);
+  assertEq(ev.payload.source, 'bye');
+  assertEq(ev.payload.result, 'bye');
+});
+
+test('simulatePlayerRound bye does not touch FocusSystem.onRoundSimulated', () => {
+  _setByeTournament();
+  TournamentSystem.simulatePlayerRound();
+  assertEq(_focusSimulatedCalls, 0);
+});
+
+test('simulatePlayerRound can finish a tournament and allow finalize', () => {
+  _setSingleRoundTournament();
+  TournamentSystem.simulatePlayerRound();
+  assertEq(TournamentSystem.isFinished(), true);
+  const result = TournamentSystem.finalize();
+  assert(result.rank >= 1);
+});
+
+test('simulatePlayerRound win rate stays below 50% with equal displayed elo', () => {
+  let wins = 0;
+  const trials = 200;
+  const originalRandom = Math.random;
+  let seed = 12345;
+  Math.random = () => {
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+
+  try {
+    for (let i = 0; i < trials; i++) {
+      resetMocks();
+      _setSingleRoundTournament(1500);
+      const result = TournamentSystem.simulatePlayerRound();
+      if (result.result === 'win') wins += 1;
+    }
+  } finally {
+    Math.random = originalRandom;
+  }
+
+  const winRate = wins / trials;
+  assert(winRate >= 0.30 && winRate <= 0.45,
+         `expected win rate in [0.30, 0.45], got ${winRate.toFixed(3)}`);
+});
+
 console.log('\n── Standings ──');
 
 test('getStandings returns sorted by score then elo', () => {
@@ -725,6 +937,18 @@ test('finalize on a tier-2 tournament with prizes works', () => {
   assert(result.rank >= 1);
   // money should not have decreased
   assert(_finances.money >= before);
+});
+
+test('finalize emits tournament_finished with eloBefore and eloAfter', () => {
+  TournamentSystem.startTournament(_samplePayload('local_weekend_open'));
+  for (let i = 0; i < 5; i++) TournamentSystem.recordPlayerResult(1);
+
+  TournamentSystem.finalize();
+
+  const ev = _emittedEvents.find((e) => e.eventName === GameEvents.EVENTS.TOURNAMENT_FINISHED);
+  assert(ev, 'expected tournament_finished event');
+  assert('eloBefore' in ev.payload, 'payload should include eloBefore');
+  assert('eloAfter' in ev.payload, 'payload should include eloAfter');
 });
 
 // ── Summary ───────────────────────────────────────────────────
