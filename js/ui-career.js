@@ -20,7 +20,7 @@ const UICareer = (() => {
 
   // ── Screen router ─────────────────────────────────────────
 
-  const SCREENS = ['character', 'home', 'game'];
+  const SCREENS = ['character', 'home', 'lobby', 'tournament', 'game'];
 
   function _showScreen(name) {
     if (!SCREENS.includes(name)) {
@@ -30,6 +30,17 @@ const UICareer = (() => {
       const el = document.getElementById(`screen-${s}`);
       if (el) el.classList.toggle('hidden', s !== name);
     });
+  }
+
+  // ── UI mode: tracks whether the game screen is being used in
+  // free-play or in-tournament mode. This drives onGameEnd dispatch
+  // and toggles the body class that hides escape affordances.
+
+  let _mode = 'free'; // 'free' | 'tournament'
+
+  function _setMode(mode) {
+    _mode = mode;
+    document.body.classList.toggle('in-tournament', mode === 'tournament');
   }
 
   // ── Home screen ───────────────────────────────────────────
@@ -234,7 +245,18 @@ const UICareer = (() => {
 
       if (titleEl) titleEl.textContent = ev.label || ev.type;
       if (dateEl)  dateEl.textContent  = CalendarSystem.formatDate(ev.date);
-      if (bodyEl)  bodyEl.textContent  = `Event type: ${ev.type}`;
+
+      if (bodyEl) {
+        if (ev.type === 'tournament_start' && ev.payload) {
+          const p = ev.payload;
+          bodyEl.textContent =
+            `${p.rounds}-round Swiss in ${p.city || '—'}, ${p.country || ''}. ` +
+            `Spans ${p.duration || '?'} days. ` +
+            `Click OK to play it through (auto-played for now — C.3b will let you play each round on the board).`;
+        } else {
+          bodyEl.textContent = `Event type: ${ev.type}`;
+        }
+      }
 
       if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
       if (modal) modal.showModal();
@@ -244,13 +266,534 @@ const UICareer = (() => {
       const modal = document.getElementById('modal-event-prompt');
       if (modal) modal.close();
       if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+
       if (CalendarSystem.isEventPrompt()) {
+        const ev = CalendarSystem.getCurrentEvent();
+        const isTournament = ev && ev.type === 'tournament_start';
         CalendarSystem.consumeCurrentEvent();
+
+        if (isTournament) {
+          this._enterTournament(ev);
+          return;
+        }
       }
       this.render();
     },
 
+    /**
+     * Handle a tournament_start event: start the tournament in the
+     * system, switch the UI into tournament mode, and show the
+     * in-tournament screen.
+     */
+    _enterTournament(ev) {
+      try {
+        TournamentSystem.startTournament(ev.payload);
+        _setMode('tournament');
+        _showScreen('tournament');
+        tournament.render();
+        if (typeof SoundManager !== 'undefined') {
+          SoundManager.playFlowEnter(1);
+        }
+      } catch (e) {
+        console.error('[Tournament] Failed to enter:', e);
+      }
+    },
+
   };
+
+  // ── Tournament lobby screen ──────────────────────────────
+
+  const COUNTRY_FLAGS = {
+    AR: '🇦🇷', AM: '🇦🇲', AU: '🇦🇺', AZ: '🇦🇿', BR: '🇧🇷', CA: '🇨🇦',
+    CN: '🇨🇳', CU: '🇨🇺', CZ: '🇨🇿', DK: '🇩🇰', EG: '🇪🇬', EN: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+    FR: '🇫🇷', DE: '🇩🇪', GE: '🇬🇪', HU: '🇭🇺', IN: '🇮🇳', IR: '🇮🇷',
+    IL: '🇮🇱', IT: '🇮🇹', JP: '🇯🇵', KZ: '🇰🇿', MA: '🇲🇦', NL: '🇳🇱',
+    NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱', RO: '🇷🇴', RU: '🇷🇺',
+    RS: '🇷🇸', ES: '🇪🇸', SE: '🇸🇪', CH: '🇨🇭', TR: '🇹🇷', UA: '🇺🇦',
+    GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳', AT: '🇦🇹', AD: '🇦🇩',
+  };
+
+  const REASON_LABELS = {
+    elo_too_low:        'Elo too low',
+    cant_afford:        'Cannot afford the entry fee',
+    already_registered: 'Already registered',
+    unknown_tournament: 'Unknown tournament',
+    below_your_level:   'Below your level',
+  };
+
+  const lobby = {
+
+    render() {
+      const today = CalendarSystem.getDate();
+      const list  = TournamentSystem.getEligibleInstancesForYear(today.year);
+
+      const summaryEl = document.getElementById('lobby-summary');
+      if (summaryEl) {
+        const player = CareerManager.player.get();
+        const fin    = CareerManager.finances.get();
+        summaryEl.textContent =
+          `Year ${today.year} — ${list.length} events · You: Elo ${player.elo} · $${fin.money}`;
+      }
+
+      const cardsEl = document.getElementById('lobby-cards');
+      if (!cardsEl) return;
+      cardsEl.innerHTML = '';
+
+      if (list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className   = 'lobby-empty';
+        empty.textContent = 'No tournaments available this year. Try again next year.';
+        cardsEl.appendChild(empty);
+        return;
+      }
+
+      for (const item of list) {
+        cardsEl.appendChild(this._buildCard(item));
+      }
+    },
+
+    _buildCard(item) {
+      const t = item.tournament;
+      const e = item.eligible;
+
+      const card = document.createElement('div');
+      card.className = 'tour-card';
+      if (e.ok && e.warnings.length === 0) card.classList.add('eligible');
+      else if (e.ok && e.warnings.includes('below_your_level')) card.classList.add('warn');
+      else card.classList.add('locked');
+
+      // ── Top row: tier badge + date ──
+      const top = document.createElement('div');
+      top.className = 'tour-card-top';
+      const tier = document.createElement('span');
+      tier.className   = `tour-card-tier tier-${t.tier}`;
+      tier.textContent = `Tier ${t.tier}`;
+      const date = document.createElement('span');
+      date.className   = 'tour-card-date';
+      date.textContent = CalendarSystem.formatDate(item.date);
+      top.appendChild(tier);
+      top.appendChild(date);
+      card.appendChild(top);
+
+      // ── Name ──
+      const name = document.createElement('div');
+      name.className   = 'tour-card-name';
+      name.textContent = t.name;
+      card.appendChild(name);
+
+      // ── City + flag ──
+      const city = document.createElement('div');
+      city.className = 'tour-card-city';
+      const flag = COUNTRY_FLAGS[t.country] || '🏳️';
+      city.textContent = `${flag} ${t.city}, ${t.country}`;
+      card.appendChild(city);
+
+      // ── Description (italic) ──
+      if (t.description) {
+        const desc = document.createElement('div');
+        desc.className   = 'tour-card-description';
+        desc.textContent = t.description;
+        card.appendChild(desc);
+      }
+
+      // ── Stats row ──
+      const stats = document.createElement('div');
+      stats.className = 'tour-card-stats';
+      stats.innerHTML = `
+        <span>${t.rounds} rounds</span>
+        <span>${t.daysDuration}d</span>
+        <span>Elo ${t.eloMin}–${t.eloMax}</span>
+      `;
+      card.appendChild(stats);
+
+      // ── Finance row ──
+      const finance = document.createElement('div');
+      finance.className = 'tour-card-finance';
+      const totalPrize  = t.prizes.reduce((a, b) => a + b, 0);
+      finance.innerHTML = `
+        <span class="tour-card-fee">Fee: $${t.entryFee}</span>
+        <span class="tour-card-prize">Prizes: $${totalPrize}</span>
+      `;
+      card.appendChild(finance);
+
+      // ── Status / register button ──
+      if (!e.ok) {
+        const status = document.createElement('div');
+        status.className = 'tour-card-status locked';
+        const reasonText = e.reasons
+          .map((r) => REASON_LABELS[r] || r)
+          .join(' · ');
+        status.textContent = `🔒 ${reasonText}`;
+        card.appendChild(status);
+
+        const btn = document.createElement('button');
+        btn.className   = 'tour-card-register';
+        btn.disabled    = true;
+        btn.textContent = 'Locked';
+        card.appendChild(btn);
+      } else {
+        if (e.warnings.includes('below_your_level')) {
+          const status = document.createElement('div');
+          status.className   = 'tour-card-status warn';
+          status.textContent = '⚠ Below your level';
+          card.appendChild(status);
+        }
+
+        const btn = document.createElement('button');
+        btn.className   = 'tour-card-register';
+        btn.textContent = 'Register';
+        btn.addEventListener('click', () =>
+          this.onRegisterClick(item.tournamentId, item.date),
+        );
+        card.appendChild(btn);
+      }
+
+      return card;
+    },
+
+    onRegisterClick(tournamentId, date) {
+      const result = TournamentSystem.register(tournamentId, date.year);
+      if (result.ok) {
+        if (typeof SoundManager !== 'undefined') SoundManager.playGoodMove(2);
+        this._showStatus(`Registered for the ${date.year} edition.`);
+      } else {
+        if (typeof SoundManager !== 'undefined') SoundManager.playBlunder();
+        const label = REASON_LABELS[result.error] || result.error;
+        this._showStatus(`Cannot register: ${label}`, true);
+      }
+      this.render();
+    },
+
+    _showStatus(msg, isError) {
+      const el = document.getElementById('lobby-status');
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.remove('hidden', 'error');
+      if (isError) el.classList.add('error');
+      // Auto-hide after a few seconds
+      clearTimeout(this._statusTimer);
+      this._statusTimer = setTimeout(() => {
+        el.classList.add('hidden');
+      }, 4000);
+    },
+
+  };
+
+  // ── In-tournament screen ─────────────────────────────────
+
+  const tournament = {
+
+    /** Refresh the in-tournament screen from the live instance. */
+    render() {
+      const inst = TournamentSystem.getCurrentInstance();
+      if (!inst) {
+        // Nothing to show — bail and go home
+        _showScreen('home');
+        home.render();
+        return;
+      }
+
+      this._renderHeader(inst);
+      this._renderPairings(inst);
+      this._renderStandings(inst);
+      this._renderHistory(inst);
+
+      if (TournamentSystem.isFinished()) {
+        this._showFinishedPanel(inst);
+      } else {
+        this._showNextRound(inst);
+      }
+    },
+
+    _renderPairings(inst) {
+      const wrapEl  = document.getElementById('t-pairings');
+      const roundEl = document.getElementById('t-pairings-round');
+      const listEl  = document.getElementById('t-pairings-list');
+      if (!wrapEl || !listEl) return;
+
+      if (!inst.currentPairings || inst.currentPairings.length === 0) {
+        wrapEl.classList.add('hidden');
+        return;
+      }
+      wrapEl.classList.remove('hidden');
+      if (roundEl) roundEl.textContent = String(inst.currentRound);
+
+      listEl.innerHTML = '';
+      inst.currentPairings.forEach((p, i) => {
+        const div = document.createElement('div');
+        const isPlayerRow =
+          (p.white && p.white.id === 'player') ||
+          (p.black && p.black.id === 'player');
+        div.className = 't-pairing-row' + (isPlayerRow ? ' player-row' : '');
+
+        const whiteFlag = p.white ? (COUNTRY_FLAGS[p.white.nationality] || '') : '';
+        const blackFlag = p.black ? (COUNTRY_FLAGS[p.black.nationality] || '') : '';
+
+        const whiteLabel = p.white
+          ? `${whiteFlag} ${p.white.name} (${p.white.elo})`
+          : '—';
+        const blackLabel = p.black === null
+          ? 'BYE'
+          : `${blackFlag} ${p.black.name} (${p.black.elo})`;
+
+        div.innerHTML = `
+          <span class="t-pr-num">${i + 1}.</span>
+          <span class="t-pr-white">${whiteLabel}</span>
+          <span class="t-pr-vs">vs</span>
+          <span class="t-pr-black">${blackLabel}</span>
+        `;
+        listEl.appendChild(div);
+      });
+    },
+
+    _renderHeader(inst) {
+      const nameEl = document.getElementById('t-name');
+      const locEl  = document.getElementById('t-location');
+      const rEl    = document.getElementById('t-round');
+      const sEl    = document.getElementById('t-score');
+      const rkEl   = document.getElementById('t-rank');
+
+      if (nameEl) nameEl.textContent = inst.tournamentName;
+      if (locEl) {
+        const flag = COUNTRY_FLAGS[inst.country] || '🏳️';
+        locEl.textContent = `${flag} ${inst.city || '—'}, ${inst.country || ''}`;
+      }
+
+      const round = Math.min(inst.currentRound, inst.rounds);
+      if (rEl) rEl.textContent = `${round}/${inst.rounds}`;
+
+      const me = inst.field.find((p) => p.id === 'player');
+      if (sEl) sEl.textContent = me ? String(me.score) : '0';
+
+      const standings = TournamentSystem.getStandings();
+      const myRank = standings.find((s) => s.id === 'player');
+      if (rkEl) rkEl.textContent = myRank ? `${myRank.rank}/${standings.length}` : '—';
+    },
+
+    _showNextRound(inst) {
+      const nextEl    = document.getElementById('t-next-round');
+      const finishedEl = document.getElementById('t-finished');
+      if (nextEl)     nextEl.classList.remove('hidden');
+      if (finishedEl) finishedEl.classList.add('hidden');
+
+      const pairing = TournamentSystem.getCurrentPlayerPairing();
+      if (!pairing) return;
+
+      const me = inst.field.find((p) => p.id === 'player');
+      const youNameEl = document.getElementById('t-you-name');
+      const youEloEl  = document.getElementById('t-you-elo');
+      if (youNameEl) youNameEl.textContent = me.name;
+      if (youEloEl)  youEloEl.textContent  = String(me.elo);
+
+      const oppNameEl = document.getElementById('t-opp-name');
+      const oppEloEl  = document.getElementById('t-opp-elo');
+      const colorEl   = document.getElementById('t-color');
+      const playBtn   = document.getElementById('btn-play-round');
+
+      if (pairing.color === 'bye') {
+        if (oppNameEl) oppNameEl.textContent = '— BYE —';
+        if (oppEloEl)  oppEloEl.textContent  = '';
+        if (colorEl) {
+          colorEl.textContent = 'BYE';
+          colorEl.className   = 't-color-indicator bye';
+        }
+        if (playBtn) playBtn.textContent = '▶ Take the bye (+1)';
+      } else {
+        const flag = COUNTRY_FLAGS[pairing.opponent.nationality] || '';
+        if (oppNameEl) oppNameEl.textContent = `${flag} ${pairing.opponent.name}`;
+        if (oppEloEl)  oppEloEl.textContent  = String(pairing.opponent.elo);
+        if (colorEl) {
+          const c = pairing.color;
+          colorEl.textContent = c === 'w' ? 'W' : 'B';
+          colorEl.className   = 't-color-indicator ' + c;
+        }
+        if (playBtn) playBtn.textContent = '▶ Play round';
+      }
+    },
+
+    _showFinishedPanel(inst) {
+      const nextEl     = document.getElementById('t-next-round');
+      const finishedEl = document.getElementById('t-finished');
+      const msgEl      = document.getElementById('t-final-message');
+      if (nextEl)     nextEl.classList.add('hidden');
+      if (finishedEl) finishedEl.classList.remove('hidden');
+
+      const standings = TournamentSystem.getStandings();
+      const me = standings.find((s) => s.id === 'player');
+      const rank = me ? me.rank : standings.length;
+      const of   = standings.length;
+      const score = me ? me.score : 0;
+      const prize = inst.prizes[rank - 1] || 0;
+
+      if (msgEl) {
+        msgEl.innerHTML =
+          `You finished <strong>${rank}${_ordinalSuffix(rank)}</strong> of ${of} ` +
+          `with a score of <strong>${score}</strong>.` +
+          `<span class="t-prize">Prize: $${prize}</span>`;
+      }
+    },
+
+    _renderStandings(inst) {
+      const listEl = document.getElementById('t-standings-list');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+
+      const standings = TournamentSystem.getStandings();
+      for (const row of standings) this._appendStandingRow(listEl, row);
+    },
+
+    _appendStandingRow(listEl, row) {
+      const div = document.createElement('div');
+      div.className = 't-standings-row' + (row.id === 'player' ? ' player' : '');
+      const flag = COUNTRY_FLAGS[row.nationality] || '';
+      div.innerHTML = `
+        <span class="t-st-rank">${row.rank}.</span>
+        <span class="t-st-name">${flag} ${row.name}</span>
+        <span class="t-st-elo">${row.elo}</span>
+        <span class="t-st-score">${row.score}</span>
+      `;
+      listEl.appendChild(div);
+    },
+
+    _renderHistory(inst) {
+      const listEl = document.getElementById('t-history-list');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+
+      if (!inst.history.length) {
+        const empty = document.createElement('div');
+        empty.className   = 't-history-empty';
+        empty.textContent = 'No rounds played yet.';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      for (const round of inst.history) {
+        const myResult = round.results.find(
+          (r) => r.white === 'player' || r.black === 'player',
+        );
+        if (!myResult) continue;
+
+        let oppId, score, isBye;
+        if (myResult.black === null && myResult.white === 'player') {
+          isBye = true;
+          oppId = null;
+          score = 1;
+        } else if (myResult.white === 'player') {
+          oppId = myResult.black;
+          score = myResult.scoreW;
+        } else {
+          oppId = myResult.white;
+          score = myResult.scoreB;
+        }
+
+        const opp = oppId ? inst.field.find((p) => p.id === oppId) : null;
+        const oppFlag = opp ? (COUNTRY_FLAGS[opp.nationality] || '') : '';
+        const oppLabel = isBye
+          ? '— BYE —'
+          : (opp ? `${oppFlag} ${opp.name} (${opp.elo})` : '?');
+
+        let cls, label;
+        if (isBye)           { cls = 'bye';  label = '+1'; }
+        else if (score === 1)  { cls = 'win';  label = '1 - 0'; }
+        else if (score === 0)  { cls = 'loss'; label = '0 - 1'; }
+        else                   { cls = 'draw'; label = '½ - ½'; }
+
+        const div = document.createElement('div');
+        div.className = 't-history-row';
+        div.innerHTML = `
+          <span class="t-history-round">R${round.round}</span>
+          <span class="t-history-opp">${oppLabel}</span>
+          <span class="t-history-result ${cls}">${label}</span>
+        `;
+        listEl.appendChild(div);
+      }
+    },
+
+    /** Play button handler. */
+    onPlayRound() {
+      const pairing = TournamentSystem.getCurrentPlayerPairing();
+      if (!pairing) return;
+
+      if (pairing.color === 'bye') {
+        // Free point — no game to play
+        TournamentSystem.recordPlayerResult(1);
+        if (typeof SoundManager !== 'undefined') SoundManager.playGoodMove(2);
+        this.render();
+        return;
+      }
+
+      // Hand off to the chess board
+      UIManager.setOpponent({
+        name:        pairing.opponent.name,
+        elo:         pairing.opponent.elo,
+        id:          pairing.opponent.id,
+        nationality: pairing.opponent.nationality,
+      });
+      _showScreen('game');
+      UIManager.newGame(pairing.color);
+    },
+
+    /** Finalize button handler. */
+    onFinalize() {
+      try {
+        const result = TournamentSystem.finalize();
+        if (typeof SoundManager !== 'undefined') {
+          if (result.prize > 0) SoundManager.playVictory();
+          else                  SoundManager.playFlowExit();
+        }
+        _setMode('free');
+        _showScreen('home');
+        home.render();
+
+        const status = document.getElementById('career-continue-status');
+        if (status) {
+          status.textContent =
+            `Tournament: ${result.rank}/${result.of} · score ${result.score} · prize $${result.prize}`;
+          status.classList.add('warn');
+        }
+      } catch (e) {
+        console.error('[Tournament] Finalize failed:', e);
+      }
+    },
+
+  };
+
+  function _ordinalSuffix(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'st';
+    if (mod10 === 2 && mod100 !== 12) return 'nd';
+    if (mod10 === 3 && mod100 !== 13) return 'rd';
+    return 'th';
+  }
+
+  // ── Game end dispatch (free vs tournament) ──────────────
+
+  function _handleGameEnd(result) {
+    if (_mode === 'tournament') {
+      const scoreMap = { win: 1, draw: 0.5, loss: 0 };
+      const score = scoreMap[result] !== undefined ? scoreMap[result] : 0.5;
+      try {
+        TournamentSystem.recordPlayerResult(score);
+      } catch (e) {
+        console.error('[Tournament] recordPlayerResult failed:', e);
+      }
+      // After the post-game status line settles, jump back to the
+      // tournament screen so the player sees the standings update
+      // and either the next pairing or the finished panel.
+      setTimeout(() => {
+        _showScreen('tournament');
+        tournament.render();
+      }, 1500);
+      return;
+    }
+
+    // Free mode: the classic "return to home after 1.5s" behavior
+    setTimeout(() => {
+      _showScreen('home');
+      home.render();
+    }, 1500);
+  }
 
   // ── Bindings ──────────────────────────────────────────────
 
@@ -293,6 +836,38 @@ const UICareer = (() => {
         home.render();
       });
     }
+
+    // Browse tournaments → lobby
+    const btnBrowse = document.getElementById('btn-browse-tournaments');
+    if (btnBrowse) {
+      btnBrowse.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('lobby');
+        lobby.render();
+      });
+    }
+
+    // Lobby → back to home
+    const btnLobbyBack = document.getElementById('btn-lobby-back');
+    if (btnLobbyBack) {
+      btnLobbyBack.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+        _showScreen('home');
+        home.render();
+      });
+    }
+
+    // Tournament — Play round
+    const btnPlayRound = document.getElementById('btn-play-round');
+    if (btnPlayRound) {
+      btnPlayRound.addEventListener('click', () => tournament.onPlayRound());
+    }
+
+    // Tournament — Finalize & return home
+    const btnFinalize = document.getElementById('btn-finalize');
+    if (btnFinalize) {
+      btnFinalize.addEventListener('click', () => tournament.onFinalize());
+    }
   }
 
   // ── Public API ────────────────────────────────────────────
@@ -301,11 +876,22 @@ const UICareer = (() => {
     init() {
       _bindButtons();
       home.render();
+
+      // Wire the UIManager game-end callback to our mode dispatcher
+      // so tournament rounds can be driven from the chess board.
+      if (typeof UIManager !== 'undefined') {
+        UIManager.onGameEnd = (result) => _handleGameEnd(result);
+      }
     },
 
     showScreen: _showScreen,
 
     home,
+    lobby,
+    tournament,
+
+    getMode: () => _mode,
+    setMode: _setMode,
   };
 
 })();

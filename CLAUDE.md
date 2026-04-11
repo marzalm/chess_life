@@ -147,6 +147,13 @@ Suppression des fichiers de l'ancienne direction Pokémon, nettoyage d'[index.ht
 **Phase C — Tournois Tier 1 et 2**
 `tournament-system.js` et `tournament-data.js`. Un tournoi = une série de rounds contre des adversaires Maia générés (nom, Elo, nationalité, portrait). Appariements de type suisse simplifié. Gains/pertes Elo FIDE. Prize money versé au solde. Seulement les Tiers 1 et 2 (amateur local + national amateur). Les parties se jouent sur l'échiquier existant avec le système Focus.
 
+- **C.1 ✅ (2026-04-10)** — `tournament-data.js` : catalogue de **24 tournois** = 6 templates Tier 1 universels (`home: true`, country/city remplis par C.2 selon la nationalité du joueur) + 18 vrais tournois Tier 2 dans 11 pays (Tata Steel, Moscow Open, Cappelle, Prague, Atlantic City, Grenke, World Open, Czech Open, Biel, Andorra, Vienna, Politiken, British Major, Continental, Avignon, Championnat Amateur FR, North American, Hastings). Schéma complet, API lookup/eligibilité/getHomeTemplates/getFixedLocationTournaments/getInstancesForYear. 26 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
+- **C.2a ✅ (2026-04-10)** — `tournament-system.js` : `HOME_CITIES` (40 nations → ville par défaut), pools de noms par nationalité (20 pays + fallback générique), `resolve()` qui résout les `home: true` selon `player.nationality`, `generateOpponent()` (Tier 1 = 90% locaux, Tier 2 = 60% locaux), barrières d'entrée `canRegister()` avec raisons explicites (hard : `elo_too_low`, `cant_afford` / soft : `below_your_level`), `register()` qui déduit l'entrée et schedule un seul événement `tournament_start` par tournoi, `getEligibleInstancesForYear()` pour la lobby. 27 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
+- **C.2b ✅ (2026-04-10)** — Run loop de tournoi : `startTournament` (génération du field `max(8, rounds × 8)` joueurs), pairings suisse Monrad simplifiés, simulation Elo des matchs NPC vs NPC (modèle E + 30% draw rate), `recordPlayerResult` qui avance round par round, `getStandings` triées score puis elo, `finalize` qui paie le prize selon le rang, push dans `history.tournaments` et avance le calendrier de `daysDuration` jours. État vivant dans `CareerManager.calendar.currentTournament`. 22 nouveaux tests, **49 verts au total**. Voir [CHANGELOG.md](CHANGELOG.md).
+- **C.3a ✅ (2026-04-10)** — Lobby UI : `#screen-lobby` plein écran avec cards de tournoi (tier badge, date, ville+drapeau, description, stats, fee/prize, status d'éligibilité vert/gold/rouge avec raisons), bouton `🏆 Browse tournaments` sur le home, sous-namespace `UICareer.lobby`, sound hooks. **Auto-play temporaire** sur les `tournament_start` events (start → recordPlayerResult ×N avec résultats aléatoires → finalize) pour permettre de tester le full register → calendar → tournoi → prize sans attendre l'écran in-tournament. C.3b remplacera l'auto-play par du jeu interactif sur l'échiquier. Voir [CHANGELOG.md](CHANGELOG.md).
+- **C.3b ✅ (2026-04-10)** — Bug fix inscription multiple (nouvelle barrière `already_registered` + `CalendarSystem.getAllEvents()`) + vrai écran in-tournament. Header (nom/ville/round/score/rank), card "Next round" (pairing avec couleur W/B/BYE + Play button), panel "Finished" (résumé + prize + Finalize), standings top 10 + joueur si hors top, round history avec notation d'échecs colorée. `UICareer.tournament` sub-namespace, `_mode = 'free' | 'tournament'`, dispatch `UIManager.onGameEnd` via `_handleGameEnd`. Body class `.in-tournament` cache New game et Back to home pour empêcher l'abandon mid-round. Resume sur reload via `CalendarSystem.isInTournament()`. Auto-play supprimé. 53 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
+- **C.4** — premier tournoi jouable bout-en-bout (polish final, test utilisateur)
+
 **Phase D — Inbox**
 `inbox-system.js` avec templates de mails : articles de presse après chaque tournoi (podium ou pas, performance, Elo gagné), messages automatiques de fédération (invitations, résultats officiels). Écran inbox intégré. Les mails arrivent au fil du calendrier.
 
@@ -182,11 +189,129 @@ Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pag
 
 Exemples : variables `playerName` pas `nomJoueur`, fichier `tournament-data.js` pas `donnees-tournois.js`, bouton UI "Continue" pas "Continuer".
 
+## Intentions futures (à garder en tête pendant les phases suivantes)
+
+- **Niveaux de difficulté global avec scaling dynamique (easy / normal / realistic)** *(décidé en C.4, 2026-04-10)*
+
+  Le jeu est conçu pour être accessible aux joueurs d'un Elo modeste. La
+  force réelle des adversaires doit être plus basse que l'Elo affiché pour
+  rester ludique. **Point clé :** le décalage doit être **dynamique en
+  fonction du gap d'Elo**, pas un simple offset fixe. Raison : battre un
+  2000 affiché devient impossible pour un 600 réel, même si le 2000 joue
+  "comme un 1700". À l'inverse, quand le joueur est proche en Elo, on
+  veut préserver le challenge.
+
+  **Idée retenue : dampening sigmoïde du gap Elo affiché.**
+
+  On introduit une fonction `effectiveOpponentElo(playerElo, displayedElo, difficulty)`
+  qui réduit le gap au lieu de l'offsetter. Pseudo-code :
+
+  ```js
+  function effectiveOpponentElo(playerElo, oppElo, difficulty) {
+    const gap = oppElo - playerElo;       // peut être négatif si l'opp est plus faible
+    if (gap <= 0) return oppElo;          // on n'aide jamais contre plus faible
+    const factor = { easy: 0.40, normal: 0.65, realistic: 1.00 }[difficulty];
+    return Math.round(playerElo + gap * factor);
+  }
+  ```
+
+  Exemples concrets (`playerElo = 600`) :
+
+  | Adversaire affiché | Gap | easy (0.40) | normal (0.65) | realistic (1.00) |
+  |---|---|---|---|---|
+  | 800  | +200 | 680  | 730  | 800  |
+  | 1200 | +600 | 840  | 990  | 1200 |
+  | 2000 | +1400 | 1160 | 1510 | 2000 |
+
+  Plus le gap est grand, plus l'écart absolu entre "joué" et "affiché" est
+  grand. Plus le joueur se rapproche, moins l'aide fait effet (jusqu'à
+  disparaître quand `gap ≤ 0`).
+
+  **Propriétés** :
+  - Jamais d'aide contre un adversaire de même niveau ou plus faible
+    (pas de "victoire trop facile" qui casse l'immersion).
+  - Jamais en dessous du `playerElo` lui-même → l'adversaire aidé reste
+    plus fort que le joueur, la progression reste méritée.
+  - Scaling progressif et continu → pas de "marches" surprenantes.
+  - Les gains d'Elo restent basés sur l'Elo **affiché** (celui du
+    catalogue), donc le joueur progresse comme si l'adversaire était à
+    sa force officielle. C'est l'idée clé d'accessibilité : "je gagne
+    comme si j'avais battu un 1200, mais le 1200 jouait à 990".
+
+  **Implémentation** :
+  - Nouveau champ `player.settings.difficulty ∈ { 'easy', 'normal', 'realistic' }`
+    (défaut `'normal'`), choisi au character creator (Phase B.5 extended)
+    et ajustable plus tard via un futur écran Settings.
+  - Fonction utilitaire `_effectiveOpponentElo` dans `ui-manager.js` (ou
+    module dédié `difficulty-system.js` si elle grossit).
+  - Point d'intégration : `UIManager._triggerAIMove` qui construit
+    l'appel à `MaiaEngine.getMove(fen, oppElo, playerElo)` — on passe
+    `effectiveOpponentElo(player.elo, this._opponentElo, player.settings.difficulty)`
+    à la place de `this._opponentElo`.
+  - **Aucun** autre point de lecture. Les standings, barrières d'entrée,
+    tournament payouts, gains Elo FIDE, appariements suisses → tout reste
+    sur l'Elo affiché.
+  - Phase G (Tier 4+) : envisager des facteurs `easy/normal` légèrement
+    plus stricts (0.50 / 0.75) pour éviter que l'aide devienne trop
+    généreuse dans les tournois élite — ajustable par tier.
+
+- **Form rating / bonus temporaire après coaching** *(noté en C.4, 2026-04-10)*
+  L'idée du joueur : "quand je gagne de l'Elo via coaching, les adversaires
+  deviennent un peu plus faibles pour me laisser franchir le plafond
+  officiel". Séduisant mais mélange deux concepts.
+  - **Option retenue à développer** en Phase E : un "form rating" caché
+    symétrique. Le joueur a son Elo officiel (qui bouge par tournois FIDE)
+    et une "forme" (monte via puzzles/coaching, baisse via inactivité).
+    La forme modifie le **joueur** pas les adversaires, via des
+    modificateurs Focus temporaires (réduction du coût SF, bonus de gain
+    Flow, etc.) — c'est mathématiquement équivalent à rendre les adversaires
+    plus faibles mais ça reste dans ton propre référentiel, plus facile à
+    expliquer et à débugger.
+  - **Option complémentaire** : un bonus explicite et visible, appliqué
+    sur le prochain tournoi seulement, matérialisé par une icône dans
+    l'UI ("In form: +2 focus gain this tournament"). Déjà prévu en
+    Phase E via les puzzles thématiques des coachs.
+  - Surtout NE PAS faire : la compression dynamique des Elo adverses
+    selon l'état coaching du joueur, trop opaque pour le joueur.
+
+- **Inscription aux tournois via mail et conseil de coach** *(noté en C.3a, 2026-04-10)*
+  Pour l'instant, la seule entrée dans le calendrier d'un tournoi est
+  le lobby manuel (Browse tournaments). En Phase D, le système inbox
+  générera des **invitations par mail** (éditeur d'un tournoi qui
+  propose une entrée gratuite ou subventionnée). En Phase E, les
+  **coachs** pourront suggérer des tournois adaptés au profil de leur
+  élève via un mail ou un écran dédié. Quand on câblera ces sources :
+  - `TournamentSystem.register()` reste l'API canonique de l'inscription
+    (dédup + charge + scheduling), peu importe l'origine de la demande.
+  - Ajouter un paramètre optionnel `register(id, year, { source: 'lobby'|'mail'|'coach', feeOverride })`
+    pour tracer l'origine et permettre aux invitations de couvrir tout
+    ou partie de l'entry fee.
+  - Le lobby manuel reste la source de vérité "je cherche un tournoi"
+    mais on devrait le réorganiser par pays / prestige (filtre
+    régional, filtre tier, tri par date) quand la liste dépasse ~20.
+    Le catalogue actuel compte déjà 24 entrées, ça commence à demander
+    du tri.
+
 ## Refactors différés (à reprendre quand le moment sera venu)
 
 Ces décisions ont été prises avec la note "à revoir plus tard". Quand
 tu travailles sur le module concerné, vérifie si l'un de ces points
 est mûr pour être traité.
+
+- **Swiss pairing — color balancing across rounds** *(décidé en C.2b, 2026-04-10)*
+  Le `_pairRound` actuel alterne les couleurs simplement par index de pairing,
+  sans regarder l'historique de couleurs des joueurs. Le système de tournoi
+  réel équilibre B/W sur la longueur du tournoi. **Refactor déclencheur** :
+  quand on aura besoin de réalisme compétitif (Tier 4+ avec normes IM/GM)
+  ou quand un joueur se plaindra de jouer Black 5 fois sur 9. À ce moment,
+  enrichir `_pairRound` avec un état `colorsHad` par joueur et préférer
+  les pairings qui équilibrent.
+
+- **Swiss tiebreaks (Buchholz / Sonneborn-Berger)** *(décidé en C.2b)*
+  Les standings actuelles trient par score puis par Elo. Les vrais Swiss
+  utilisent Buchholz (somme des scores des adversaires), Sonneborn-Berger,
+  ou progressive score. **Refactor déclencheur** : quand on rendra publiques
+  les standings dans le lobby et que le rang sera disputé serré.
 
 - **Calendar dispatcher style ZenGM strict** *(décidé en B.3, 2026-04-10)*
   Notre `calendar-system.js` expose des fonctions de transition nommées

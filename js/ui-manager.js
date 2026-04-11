@@ -16,10 +16,11 @@ const UIManager = {
   pendingPromotion: null,
 
   // AI state
-  _aiThinking:   false,
-  _opponentName: null,
-  _opponentElo:  null,
-  _opponentId:   null,
+  _aiThinking:        false,
+  _opponentName:      null,
+  _opponentElo:       null,
+  _opponentId:        null,
+  _opponentNationality: null,
 
   // Stockfish visuals
   sfArrow: null, // N3 arrow { from, to }
@@ -34,6 +35,10 @@ const UIManager = {
   // Move evaluations (from FocusSystem callback)
   _moveEvals:       {},
   _moveEvalSquares: {},
+
+  // Move navigation: null = live mode, otherwise integer ply we're
+  // previewing (0 = before any move, history.length = live).
+  _viewPly: null,
 
   // Callback fired when a game ends. External code (career flow) can
   // subscribe by setting UIManager.onGameEnd = (result) => {...}.
@@ -72,12 +77,13 @@ const UIManager = {
 
   /**
    * Set the AI opponent for the next game.
-   * @param {{ name: string, elo: number, id?: string }} opponent
+   * @param {{ name: string, elo: number, id?: string, nationality?: string }} opponent
    */
   setOpponent(opponent) {
-    this._opponentName = opponent.name;
-    this._opponentElo  = opponent.elo;
-    this._opponentId   = opponent.id || null;
+    this._opponentName        = opponent.name;
+    this._opponentElo         = opponent.elo;
+    this._opponentId          = opponent.id || null;
+    this._opponentNationality = opponent.nationality || null;
   },
 
   /** Show the game screen. */
@@ -94,39 +100,63 @@ const UIManager = {
 
   // ── BOARD RENDERING ──────────────────────────────────────────
 
+  /**
+   * Returns a piece accessor function for the current render mode.
+   * Live mode uses ChessEngine; preview mode builds a temporary
+   * chess.js instance that has replayed the history up to _viewPly.
+   */
+  _getPieceAccessor() {
+    if (this._viewPly === null) {
+      return (sq) => ChessEngine.getPiece(sq);
+    }
+    // Build a temporary Chess by replaying the SAN history
+    const chess = new Chess();
+    const history = ChessEngine.getHistory();
+    const limit = Math.min(this._viewPly, history.length);
+    for (let i = 0; i < limit; i++) {
+      chess.move(history[i]);
+    }
+    return (sq) => chess.get(sq);
+  },
+
   renderBoard() {
     const board = document.getElementById('board');
     if (!board) return;
     board.innerHTML = '';
 
+    const isViewing = this._viewPly !== null;
+    const getPiece  = this._getPieceAccessor();
+
     const isFlipped = ChessEngine.getPlayerColor() === 'b';
     const files = isFlipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
     const ranks = isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
 
-    const legalTargets   = this.legalMoves.map(m => m.to);
-    const captureTargets = this.legalMoves
+    // In view mode, do not show legal-move hints, check highlight,
+    // or flow highlights — those refer to the live position.
+    const legalTargets   = isViewing ? [] : this.legalMoves.map(m => m.to);
+    const captureTargets = isViewing ? [] : this.legalMoves
       .filter(m => m.flags.includes('c') || m.flags.includes('e'))
       .map(m => m.to);
 
-    const inCheck    = ChessEngine.isInCheck();
+    const inCheck    = !isViewing && ChessEngine.isInCheck();
     const kingSquare = inCheck ? this._findKing(ChessEngine.getTurn()) : null;
 
     ranks.forEach((rank, ri) => {
       files.forEach((file, fi) => {
         const square  = file + rank;
-        const piece   = ChessEngine.getPiece(square);
+        const piece   = getPiece(square);
         const isLight = (ri + fi) % 2 === 0;
 
         const el = document.createElement('div');
         el.className      = 'square ' + (isLight ? 'light' : 'dark');
         el.dataset.square = square;
 
-        if (square === this.selectedSquare)                                    el.classList.add('selected');
-        if (this.lastMove?.from === square || this.lastMove?.to === square)    el.classList.add('last-move');
-        if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
-        if (captureTargets.includes(square))                                   el.classList.add('legal-capture');
-        if (inCheck && square === kingSquare)                                  el.classList.add('in-check');
-        if (this.flowHighlights.includes(square))                              el.classList.add('flow-highlight');
+        if (!isViewing && square === this.selectedSquare)                          el.classList.add('selected');
+        if (!isViewing && (this.lastMove?.from === square || this.lastMove?.to === square)) el.classList.add('last-move');
+        if (legalTargets.includes(square) && !captureTargets.includes(square))     el.classList.add('legal-move');
+        if (captureTargets.includes(square))                                       el.classList.add('legal-capture');
+        if (inCheck && square === kingSquare)                                      el.classList.add('in-check');
+        if (!isViewing && this.flowHighlights.includes(square))                    el.classList.add('flow-highlight');
 
         if (fi === 0) {
           const r = document.createElement('span');
@@ -155,10 +185,72 @@ const UIManager = {
       });
     });
 
-    this._renderArrow();
-    this._renderThreatArrows();
-    this._renderCapturedPieces();
+    if (!isViewing) {
+      this._renderArrow();
+      this._renderThreatArrows();
+      this._renderCapturedPieces();
+    } else {
+      // Clear live-only decorations in view mode
+      const old = document.getElementById('sf-arrow-img');
+      if (old) old.remove();
+      document.querySelectorAll('.threat-arrow-img').forEach((e) => e.remove());
+    }
+
+    this._updateNavUI();
   },
+
+  // ── MOVE NAVIGATION ─────────────────────────────────────────
+
+  _updateNavUI() {
+    const labelEl = document.getElementById('board-nav-label');
+    const startBtn = document.getElementById('btn-nav-start');
+    const prevBtn  = document.getElementById('btn-nav-prev');
+    const nextBtn  = document.getElementById('btn-nav-next');
+    const liveBtn  = document.getElementById('btn-nav-live');
+
+    const total = ChessEngine.getHistory().length;
+
+    if (labelEl) {
+      if (this._viewPly === null) {
+        labelEl.textContent = 'Live';
+        labelEl.classList.remove('viewing');
+      } else {
+        labelEl.textContent = `Move ${this._viewPly}/${total}`;
+        labelEl.classList.add('viewing');
+      }
+    }
+
+    const currentPly = this._viewPly === null ? total : this._viewPly;
+    if (startBtn) startBtn.disabled = currentPly === 0;
+    if (prevBtn)  prevBtn.disabled  = currentPly === 0;
+    if (nextBtn)  nextBtn.disabled  = currentPly >= total;
+    if (liveBtn)  liveBtn.disabled  = this._viewPly === null;
+  },
+
+  /** Jump to a specific ply (0 = initial position, total = live). */
+  _goToPly(ply) {
+    const total = ChessEngine.getHistory().length;
+    if (ply < 0) ply = 0;
+    if (ply >= total) {
+      this._viewPly = null;
+    } else {
+      this._viewPly = ply;
+    }
+    this.renderBoard();
+  },
+
+  _navStart() { this._goToPly(0); },
+  _navPrev() {
+    const total = ChessEngine.getHistory().length;
+    const cur = this._viewPly === null ? total : this._viewPly;
+    this._goToPly(cur - 1);
+  },
+  _navNext() {
+    const total = ChessEngine.getHistory().length;
+    const cur = this._viewPly === null ? total : this._viewPly;
+    this._goToPly(cur + 1);
+  },
+  _navLive() { this._goToPly(ChessEngine.getHistory().length); },
 
   // ── HIGHLIGHTS ───────────────────────────────────────────────
 
@@ -248,6 +340,7 @@ const UIManager = {
   // ── CLICK HANDLING ───────────────────────────────────────────
 
   onSquareClick(square) {
+    if (this._viewPly !== null) return;     // view mode: read-only
     if (ChessEngine.isGameOver()) return;
     if (this._aiThinking) return;
     if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) return;
@@ -340,20 +433,46 @@ const UIManager = {
     this._clearStockfishVisuals();
     this._moveEvals       = {};
     this._moveEvalSquares = {};
+    this._viewPly         = null;
 
     FocusSystem.resetForGame();
 
     // Fallback placeholder opponent (Phase A — Phase C will always set one)
     if (!this._opponentName) {
-      this._opponentName = 'Test Opponent';
-      this._opponentElo  = 800;
-      this._opponentId   = null;
+      this._opponentName        = 'Test Opponent';
+      this._opponentElo         = 800;
+      this._opponentId          = null;
+      this._opponentNationality = null;
     }
 
     const player = CareerManager.hasCharacter() ? CareerManager.player.get() : null;
-    document.getElementById('player-elo').textContent    = player ? player.elo : 800;
-    document.getElementById('opponent-name').textContent = this._opponentName;
-    document.getElementById('opponent-elo').textContent  = this._opponentElo;
+
+    const pNameEl = document.getElementById('player-name-label');
+    if (pNameEl) pNameEl.textContent = player ? (player.playerName || 'You') : 'You';
+    document.getElementById('player-elo').textContent = player ? player.elo : 800;
+
+    const pAvatar = document.getElementById('player-avatar-slot');
+    if (pAvatar && player && typeof UICareer !== 'undefined') {
+      UICareer.home._renderAvatarInto(pAvatar, player.avatar);
+    }
+
+    document.getElementById('opponent-elo').textContent = this._opponentElo;
+    const oppNameEl = document.getElementById('opponent-name');
+    if (oppNameEl) {
+      const flag = this._flagFor(this._opponentNationality);
+      oppNameEl.textContent = flag
+        ? `${flag} ${this._opponentName}`
+        : this._opponentName;
+    }
+
+    const oAvatar = document.getElementById('opponent-avatar-slot');
+    if (oAvatar) {
+      oAvatar.innerHTML = '';
+      const flag = document.createElement('span');
+      flag.className   = 'game-id-avatar-flag';
+      flag.textContent = this._flagFor(this._opponentNationality) || '♟';
+      oAvatar.appendChild(flag);
+    }
     document.getElementById('moves-list').innerHTML = '';
     document.getElementById('sf-feedback').textContent =
       'Activate Stockfish to analyze the position.';
@@ -395,6 +514,8 @@ const UIManager = {
     const ply = ChessEngine.getHistory().length;
     this._moveEvalSquares[ply] = to;
 
+    // Any new move forces the view back to live mode
+    this._viewPly       = null;
     this.lastMove       = { from, to };
     this.selectedSquare = null;
     this.legalMoves     = [];
@@ -861,6 +982,7 @@ const UIManager = {
         else                     SoundManager.playMove();
       }
 
+      this._viewPly = null;
       this.lastMove = { from, to };
       this.renderBoard();
       this.updateMoveHistory();
@@ -873,6 +995,20 @@ const UIManager = {
       this._aiThinking = false;
       this.showStatus('AI error — start a new game.');
     }
+  },
+
+  /** Convert an ISO country code to a flag emoji. Returns '' on miss. */
+  _flagFor(code) {
+    const flags = {
+      AR: '🇦🇷', AM: '🇦🇲', AU: '🇦🇺', AZ: '🇦🇿', AT: '🇦🇹', AD: '🇦🇩',
+      BR: '🇧🇷', CA: '🇨🇦', CN: '🇨🇳', CU: '🇨🇺', CZ: '🇨🇿', DK: '🇩🇰',
+      EG: '🇪🇬', EN: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', FR: '🇫🇷', DE: '🇩🇪', GE: '🇬🇪', HU: '🇭🇺',
+      IN: '🇮🇳', IR: '🇮🇷', IL: '🇮🇱', IT: '🇮🇹', JP: '🇯🇵', KZ: '🇰🇿',
+      MA: '🇲🇦', NL: '🇳🇱', NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱',
+      RO: '🇷🇴', RU: '🇷🇺', RS: '🇷🇸', ES: '🇪🇸', SE: '🇸🇪', CH: '🇨🇭',
+      TR: '🇹🇷', UA: '🇺🇦', GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳',
+    };
+    return flags[code] || '';
   },
 
   _findKing(color) {
@@ -974,6 +1110,16 @@ const UIManager = {
         CareerManager.focus.sync();
       };
     }
+
+    // Move navigation
+    const navStart = document.getElementById('btn-nav-start');
+    const navPrev  = document.getElementById('btn-nav-prev');
+    const navNext  = document.getElementById('btn-nav-next');
+    const navLive  = document.getElementById('btn-nav-live');
+    if (navStart) navStart.onclick = () => this._navStart();
+    if (navPrev)  navPrev.onclick  = () => this._navPrev();
+    if (navNext)  navNext.onclick  = () => this._navNext();
+    if (navLive)  navLive.onclick  = () => this._navLive();
   },
 
 };
@@ -989,24 +1135,21 @@ window.addEventListener('DOMContentLoaded', () => {
   CareerManager.init();
   CalendarSystem.init();
   UIManager.init();
-  UICareer.init();
+  UICareer.init();          // wires UIManager.onGameEnd itself
   CharacterCreator.init();
 
-  // When a test game ends, automatically return to the home screen.
-  UIManager.onGameEnd = () => {
-    setTimeout(() => {
-      UICareer.showScreen('home');
-      UICareer.home.render();
-    }, 1500);
-  };
-
   // Initial routing: if no character, show the creator. Otherwise
-  // jump straight to the home screen.
+  // jump straight to the home screen. If a tournament was in progress
+  // when the tab was closed, resume right into the tournament screen.
   if (!CareerManager.hasCharacter()) {
     CharacterCreator.show(() => {
       UICareer.showScreen('home');
       UICareer.home.render();
     });
+  } else if (CalendarSystem.isInTournament && CalendarSystem.isInTournament()) {
+    UICareer.setMode('tournament');
+    UICareer.showScreen('tournament');
+    UICareer.tournament.render();
   } else {
     UICareer.showScreen('home');
     UICareer.home.render();

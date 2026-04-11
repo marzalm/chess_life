@@ -330,7 +330,7 @@ const FocusSystem = {
    * @param {string|null} captured  - type de pièce capturée ('p','n','b','r','q') ou null
    * @param {number}  [plyIndex=0]  - numéro du demi-coup (pour traçabilité UI)
    */
-  evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex, isBookMove, pieceCount) {
+  evaluateMoveDelta(deltaCp, sfUsed, captured, plyIndex, isBookMove, pieceCount, cpBefore) {
     const abs = Math.abs(deltaCp);
     const threshold = this._getGoodMoveThreshold();
 
@@ -339,6 +339,26 @@ const FocusSystem = {
     const complexity = pieceCount != null
       ? Math.max(0.25, Math.min(1.0, (pieceCount - 4) / 28))
       : 1.0;
+
+    // One-sided factor: when the position is already decisively won
+    // or lost (huge |cpBefore|), the "best move" is easy to find —
+    // push the king, win the exchange, avoid stalemate. Focus gains
+    // should be damped there so trivial wins don't farm the Flow
+    // state. Scale smoothly:
+    //   |cpBefore| < 200  → 1.00  (normal gains)
+    //   |cpBefore| = 400  → 0.70
+    //   |cpBefore| = 600  → 0.45
+    //   |cpBefore| ≥ 900  → 0.20  (minimum)
+    // Losses are also damped (if I'm already winning a piece up, a
+    // blunder that only drops me back to still-winning shouldn't
+    // cost full focus).
+    let oneSided = 1.0;
+    if (typeof cpBefore === 'number') {
+      const absBefore = Math.abs(cpBefore);
+      if (absBefore > 200) {
+        oneSided = Math.max(0.20, 1.0 - (absBefore - 200) / 800);
+      }
+    }
 
     // Classification du coup (pour l'UI : historique + texte flottant)
     let evalInfo;
@@ -361,7 +381,9 @@ const FocusSystem = {
     if (abs < threshold && !sfUsed) {
       // ── Bon ou meilleur coup ──
       const isBest = abs <= 12;
-      const gain   = Math.round(this._getMomentumGain(isBest) * complexity);
+      const gain   = Math.round(
+        this._getMomentumGain(isBest) * complexity * oneSided,
+      );
       this.apply(+gain, isBest ? 'Meilleur coup' : 'Bon coup');
 
       // Incrémenter le compteur :
@@ -385,8 +407,11 @@ const FocusSystem = {
 
     } else if (abs >= 100) {
       // ── Mauvais coup (imprécision ou blunder) ──
-      const penalty = this._getGraduatedPenalty(abs);
-      const isBlunder = abs >= 200;
+      // Dampen the penalty too when the position is one-sided:
+      // a blunder from +800 to +200 still leaves you winning.
+      const rawPenalty = this._getGraduatedPenalty(abs);
+      const penalty    = Math.round(rawPenalty * oneSided);
+      const isBlunder  = abs >= 200;
       this.apply(penalty, isBlunder ? 'Blunder' : 'Imprécision');
 
       // Dégradation du Flow

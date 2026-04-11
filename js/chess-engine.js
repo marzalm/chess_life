@@ -212,7 +212,12 @@ const ChessEngine = (() => {
       }
     }
 
-    FocusSystem.evaluateMoveDelta(deltaCp, sfUsedFlag, capturedPiece || null, plyIndex, isBookMove, pieceCount);
+    // Pass cpBefore so FocusSystem can dampen gains/losses in
+    // positions that are already trivially decided (huge eval gap).
+    FocusSystem.evaluateMoveDelta(
+      deltaCp, sfUsedFlag, capturedPiece || null,
+      plyIndex, isBookMove, pieceCount, cpBefore,
+    );
 
     _bgEvalRunning = false;
 

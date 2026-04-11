@@ -9,6 +9,863 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### Phase C.4 — Playtest polish (2026-04-11)
+
+Playtest round after C.3b surfaced a real bug and several UX gaps.
+This entry bundles all fixes into C.4, plus two new gameplay
+intentions documented for later phases.
+
+#### Bug fix — date-scoped duplicate registration
+
+**Report.** Registering the Local Weekend Open for April 11 blocked
+all further registrations of the same tournament — even for the May,
+June, July… instances — because `canRegister` was keyed on
+`tournamentId` alone.
+
+**Fix.**
+- `TournamentSystem.canRegister(id, targetDate?)` now takes an
+  optional target date. The `already_registered` barrier only fires
+  when the exact `(id, date)` pair is already scheduled.
+- `_nextStartDate(t, year)` consults `CalendarSystem.getAllEvents()`
+  and skips any date already booked for this tournament, so
+  `register()` rolls forward to the next free instance automatically.
+- `getEligibleInstancesForYear` and `register` both pass the target
+  date explicitly when they probe `canRegister`.
+- 1 updated test + 1 new test verifying that a second register
+  for the same tournament picks the next future instance.
+
+**Tests:** 54 total (was 53), all green.
+
+#### Name pool expansion
+
+**New module `js/name-pools.js`.** Replaces the inline 8-names-per-
+country table with 27 countries × ~30 first + ~30 last names each.
+Sources: Wikipedia "most common given/surnames in X" lists,
+cross-referenced with FIDE ratings for plausibility. The in-module
+`NAMES` table in `tournament-system.js` is kept as a hard-coded
+fallback so Node tests don't need the extra file. 27 × 900
+combinations ≈ 24k unique names available at runtime.
+
+**Unique-name guarantee.** `TournamentSystem.startTournament` now
+tracks a `usedNames` Set during field generation and retries up to
+12 times per opponent to find a name not already taken. Even a full
+Tier 2 9-round tournament (72 players) sees essentially zero
+collisions in practice.
+
+#### Tournament screen polish
+
+- **Flags everywhere.** `COUNTRY_FLAGS` table (40 nations) plumbed
+  through the standings row, round history row, and new pairings
+  panel. Every opponent gets their country flag.
+- **Scrollable standings.** The old "… and N more …" cut-off is
+  gone. The standings list uses `max-height: 360px; overflow-y: auto`
+  with a custom pixel-art scrollbar (WebKit + Firefox) using the
+  `--px-*` palette.
+- **New pairings panel.** Above the standings, a `Round N pairings`
+  section renders every match of the current round as
+  `#N | flag White (elo) vs flag Black (elo)`, with the player's row
+  highlighted in gold. Also scrollable (`max-height: 320px`).
+
+#### Game screen polish
+
+- **Avatars in the sidebar cards.** The `You` card now shows the
+  player's mini pixel avatar (reusing `UICareer.home._renderAvatarInto`)
+  + name + Elo. The `Opponent` card shows a big country flag emoji +
+  flagged name + Elo. Both cards share the new `.game-id-card` layout
+  class.
+- **UIManager.setOpponent** accepts a `nationality` field.
+  `UICareer.tournament.onPlayRound` passes it through from the current
+  pairing. `UIManager._flagFor(code)` maps ISO codes to flag emojis.
+- **Move navigation.** New button row under the board:
+  `⏮ ◀ [Live | Move N/M] ▶ ⏭`. Implementation:
+  - `UIManager._viewPly` is `null` in live mode or an integer ply.
+  - `_getPieceAccessor()` returns either `ChessEngine.getPiece` (live)
+    or a closure over a fresh `new Chess()` that has replayed the
+    SAN history up to `_viewPly` and calls `.get(square)`.
+  - View mode disables clicks on squares, hides Stockfish arrows,
+    threats, flow highlights, floating eval badges, and the last-move
+    highlight.
+  - Any new move (player or AI) resets `_viewPly = null` automatically.
+  - Zero modification to `chess-engine.js` — the navigation lives
+    entirely in `UIManager`.
+
+#### Focus system — one-sided dampening
+
+The Focus gauge used to fill just as fast in a trivially won endgame
+(move the king, win the queen) as in a real game. Now it dampens
+both gains and penalties when `|cpBefore|` indicates the position is
+already decisively one-sided.
+
+- `chess-engine._runFocusEval` passes its computed `cpBefore` to
+  `FocusSystem.evaluateMoveDelta(..., cpBefore)`.
+- New `oneSided` factor:
+
+  | `|cpBefore|` | Factor |
+  |---|---|
+  | < 200 | 1.00 |
+  | 400 | 0.70 |
+  | 600 | 0.45 |
+  | 800 | 0.25 |
+  | ≥ 900 | 0.20 (floor) |
+
+- Applied multiplicatively to both the gain path
+  (`gain * complexity * oneSided`) and the penalty path
+  (`rawPenalty * oneSided`). A blunder that only drops you from +800
+  to +200 still leaves you winning, so the Focus hit is smaller; a
+  great move in a lost position doesn't farm Focus either.
+
+#### Documentation — deferred gameplay ideas
+
+Added to `CLAUDE.md` under **Intentions futures**:
+
+- **Dynamic difficulty scaling (easy/normal/realistic).** Not a flat
+  offset. A sigmoid-style dampening of the Elo gap that scales the
+  opponent's effective Elo down more when the gap is big, less when
+  the player is close. Formula:
+  ```
+  effectiveOppElo = playerElo + gap * factor
+  factor = { easy: 0.40, normal: 0.65, realistic: 1.00 }[difficulty]
+  ```
+  Never helps against opponents at or below the player's Elo.
+  Displayed Elo in UI/standings/barriers/prize math stays on the
+  catalogue value. Point of integration:
+  `UIManager._triggerAIMove`.
+
+- **Form rating / coached-form** (Phase E+). The user wanted dynamic
+  opponent Elo based on coaching progress. Replaced by a cleaner
+  hidden "form" stat on the player side that modifies the Focus
+  system, mathematically equivalent but easier to explain and debug.
+
+#### Files touched
+
+- `js/calendar-system.js` — `getAllEvents()` (ship in C.3b) now used
+  to skip booked dates in `_nextStartDate`.
+- `js/tournament-system.js` — date-scoped `canRegister`, `register`
+  reshuffle, unique-name guarantee in `startTournament`, prefers
+  `NamePools` when loaded.
+- `js/name-pools.js` — **new**, 27 countries × ~30×30 names.
+- `js/chess-engine.js` — passes `cpBefore` to
+  `FocusSystem.evaluateMoveDelta`.
+- `js/focus-system.js` — `oneSided` factor in the scoring branch.
+- `js/ui-manager.js` — `_opponentNationality`, `_viewPly`,
+  `_getPieceAccessor`, `_updateNavUI`, `_goToPly`, `_navStart`/
+  `_navPrev`/`_navNext`/`_navLive`, `_flagFor`, avatar + flag
+  rendering in the game sidebar, button bindings for the nav row.
+- `js/ui-career.js` — `COUNTRY_FLAGS` plumbed into standings, history,
+  and pairings rendering; new `_renderPairings` sub-renderer; standings
+  no longer cuts off.
+- `index.html` — pairings panel markup, nav button row, reshaped
+  player/opponent card slots, `name-pools.js` script tag.
+- `css/career.css` — `.t-pairings` and `.t-pairing-row` styles;
+  standings scrollbar.
+- `css/ui.css` — `.game-id-card`, `.game-id-avatar`, `.game-id-name`,
+  `.board-nav-btn`, `.board-nav-label` styles.
+- `tests/tournament-system.test.js` — test rewrites for the
+  date-scoped check; 54 tests total.
+- `CLAUDE.md` — dynamic difficulty section + form rating section in
+  "Intentions futures".
+
+**Tests:** 54 tournament-system + 53 calendar + 26 tournament-data =
+**133 total, all green.**
+
+---
+
+### Phase C.3b — In-tournament screen + duplicate-register fix (2026-04-10)
+
+Replaces the Phase C.3a auto-play stub with a real in-tournament
+screen. The player now plays each round on the existing chess board
+inside a tournament context, with standings and round history
+updating live between rounds.
+
+#### Bug fix — duplicate tournament registration
+
+**Report.** The lobby let the player register multiple times for the
+same tournament, double-charging the entry fee and polluting the
+calendar with duplicate events.
+
+**Fix.**
+- `CalendarSystem.getAllEvents()` — new public accessor returning a
+  shallow copy of the event queue.
+- `TournamentSystem.canRegister()` — new hard barrier
+  `'already_registered'`, triggered when either:
+  1. Any event in the calendar queue is a `tournament_start` for this
+     tournament id, OR
+  2. `CareerManager.calendar.currentTournament.tournamentId` matches
+     (player is mid-tournament for this event)
+- `TournamentSystem.register()` still runs `canRegister` first, so
+  blocked registrations never touch finances. A regression test
+  explicitly verifies "second register does not double-charge".
+- `REASON_LABELS` in ui-career gains `already_registered → "Already
+  registered"` for display on locked cards.
+
+**4 new tests** bring the suite to **53** for tournament-system.
+
+#### In-tournament screen
+
+**New screen `#screen-tournament`** with four panels:
+
+- **Header** — tournament name + location (flag), current round
+  (`R/N`), player score, rank inside the field.
+- **Next round card** (green border) — player vs opponent pairing
+  display with color indicator (W/B/BYE), elos, and a big green
+  `▶ Play round` button. Byes show a distinct `▶ Take the bye (+1)`
+  button that skips the chess board entirely.
+- **Finished panel** (gold border, hidden until the last round) —
+  "You finished Nth of M with a score of X" + prize display + a
+  `Finalize & return home ↩` button.
+- **Standings** — top 10 rows with the player highlighted in gold.
+  If the player is outside the top 10, their row is appended at the
+  bottom with a `… and N more …` separator.
+- **Round history** — per-round line: `R1`, opponent name + Elo,
+  result in chess notation (`1 - 0`, `½ - ½`, `0 - 1`, `+1` for a
+  bye), color-coded green / grey / red / accent.
+
+**`UICareer.tournament` sub-namespace.**
+
+```text
+UICareer.tournament.render()            // full refresh
+UICareer.tournament.onPlayRound()       // Play button handler
+UICareer.tournament.onFinalize()        // Finalize button handler
+(plus private _renderHeader, _renderStandings, _renderHistory,
+ _showNextRound, _showFinishedPanel, _appendStandingRow)
+```
+
+`render()` picks between `_showNextRound` and `_showFinishedPanel`
+depending on `TournamentSystem.isFinished()`.
+
+#### Integration with the chess board
+
+**Mode flag.** `UICareer` now tracks a `_mode` variable
+(`'free' | 'tournament'`) and mirrors it on the body element via
+`document.body.classList.toggle('in-tournament')`.
+
+**Game end dispatch.** `UICareer.init()` wires
+`UIManager.onGameEnd = _handleGameEnd` once. `_handleGameEnd(result)`
+dispatches on `_mode`:
+
+- `'free'` → classic 1.5 s delay then return to home (unchanged).
+- `'tournament'` → map `win/draw/loss` to `1/0.5/0`, call
+  `TournamentSystem.recordPlayerResult(score)`, then 1.5 s delay
+  before switching back to `screen-tournament` and re-rendering.
+
+**Play round handler.** `UICareer.tournament.onPlayRound()`:
+
+1. Reads the current pairing via `TournamentSystem.getCurrentPlayerPairing()`
+2. If `color === 'bye'`: calls `recordPlayerResult(1)` directly and
+   re-renders (no chess board).
+3. Otherwise: `UIManager.setOpponent(pairing.opponent)`, switches to
+   `screen-game`, calls `UIManager.newGame(pairing.color)`.
+
+**Finalize handler.** `UICareer.tournament.onFinalize()`:
+
+1. Calls `TournamentSystem.finalize()` — pays prize, records history,
+   advances calendar, transitions back to idle.
+2. Switches back to `'free'` mode and the home screen.
+3. Writes a summary line in the home `#career-continue-status` element:
+   `Tournament: <rank>/<of> · score X · prize $Y`
+
+#### Mid-tournament escape guards
+
+When `_mode === 'tournament'`, body gets the `in-tournament` class.
+CSS hides two affordances that would otherwise abandon a round:
+
+- `#btn-new-game` (the sidebar "New game" button on the chess screen)
+- `#btn-back-home` (the "← Back to home" overlay)
+
+Both return naturally when `onFinalize()` switches back to free mode.
+
+#### Resume on reload
+
+The bootstrap now checks `CalendarSystem.isInTournament()` and, if
+true, jumps straight to `screen-tournament` instead of the home
+screen. Closing the tab mid-tournament is safe: the live instance
+lives in `CareerManager.calendar.currentTournament` and is persisted
+via `CareerManager.save()` after every round.
+
+#### Auto-play removed
+
+`home._autoPlayTournament` is gone. Replaced by `home._enterTournament`
+which calls `TournamentSystem.startTournament`, flips the mode, and
+shows the tournament screen. The old method and its sound/status
+plumbing are deleted.
+
+#### Files touched
+
+- `js/calendar-system.js` — `getAllEvents()` added.
+- `js/tournament-system.js` — `canRegister()` picks up the
+  `already_registered` check.
+- `tests/tournament-system.test.js` — mock gains `getAllEvents`;
+  four new duplicate-register tests. **53 total, all green.**
+- `index.html` — `#screen-tournament` markup (~70 lines).
+- `css/career.css` — `In-tournament screen` section (~240 lines):
+  header, next round card, finished panel, standings, history,
+  body-class escape guards.
+- `js/ui-career.js` — screen router gains `'tournament'`; `_mode`
+  variable + `_setMode` helper; `tournament` sub-namespace
+  (~220 lines); `_handleGameEnd` dispatcher; `_enterTournament`
+  replaces `_autoPlayTournament`; `REASON_LABELS.already_registered`;
+  bootstrap wires `UIManager.onGameEnd` in `init()`.
+- `js/ui-manager.js` — bootstrap no longer sets `onGameEnd` directly
+  (UICareer owns that now); resume-in-tournament branch added.
+- `CLAUDE.md` — "Intentions futures" section added noting the
+  mail/coach registration paths; `register(id, year, { source, … })`
+  shape sketched for Phase D/E; Phase C.3a marked as superseded by
+  C.3b in the roadmap.
+
+#### How to test end-to-end
+
+1. Reset career: `localStorage.removeItem('chess_life_career_v2'); location.reload();`
+2. Create a character.
+3. Home → `🏆 Browse tournaments` → register for the `Local Weekend
+   Open`. The `Register` button flips to `🔒 Already registered` on
+   re-click — bug fix verified.
+4. Back to home. The next date has a red dot on the calendar.
+5. Click `Continue ▶` until the tournament date. Modal opens with
+   tournament-specific copy. Click OK.
+6. You're now on `#screen-tournament`. Header shows Round 1/5,
+   score 0, rank in the middle of the field. Next round card shows
+   your opponent (name, flag, Elo) and your color.
+7. Click `▶ Play round`. Chess board opens. Play the game against
+   Maia (adversary elo ∈ tournament's window).
+8. On game end, you return to the tournament screen after 1.5 s.
+   Header updated, new pairing shown, round 2/5. History list has
+   a row for round 1.
+9. Repeat rounds 2→5. The system simulates every NPC vs NPC game in
+   the same round with the Elo model, so your standings move naturally.
+10. After round 5, the Finished panel replaces the Next round card.
+    Click `Finalize & return home`.
+11. Home re-renders. `cl.state.history.tournaments` has a summary
+    row. Prize (if any) added to money. Calendar advanced by
+    `daysDuration` days. The `#career-continue-status` line under
+    the Continue button shows the outcome.
+12. Return to Browse tournaments — the Local Weekend Open is now
+    re-registerable (you've finished it).
+
+**Tests (no regression).** 53 tournament-system · 53 calendar
+· 26 tournament-data = **132 tests, all green.** Run each with
+`node tests/<file>.test.js`.
+
+---
+
+### Phase C.3a — Tournament lobby UI (2026-04-10)
+
+First UI integration of Phase C: a dedicated lobby screen where the
+player browses upcoming tournaments, sees their eligibility verdict,
+and registers for events. Plus a temporary auto-play hook on the
+existing event prompt so the player can experience the full register
+→ calendar → event → result → prize loop without waiting for the
+in-tournament screen (which lands in C.3b).
+
+**New screen: `#screen-lobby`.**
+
+- Full-page list with a fixed back-to-home button (top-left).
+- Title, summary line (`Year YYYY — N events · You: Elo X · $Y`),
+  inline status banner for register feedback.
+- Cards laid out in a responsive grid (`auto-fill, minmax(280px, 1fr)`).
+- Empty state for years with no upcoming events.
+
+**Tournament card.** Each card displays:
+
+- Tier badge (`Tier 1` green / `Tier 2` blue) and start date in the top row
+- Tournament name in the accent color
+- City + country with the country flag emoji (40 nations covered)
+- One-line italic description from the catalogue
+- Stats row: rounds · days · Elo window
+- Finance row: entry fee + total prize pool
+- Eligibility status:
+  - **Green border + Register button** when fully eligible
+  - **Gold border + ⚠ Below your level + Register button** when the
+    soft warning fires but registration is still allowed
+  - **Red border + 🔒 reason + disabled Locked button** when blocked
+    by `elo_too_low` or `cant_afford`
+
+Reasons are translated from the C.2a verdict codes via a small
+`REASON_LABELS` table.
+
+**`UICareer.lobby` sub-namespace.**
+
+```text
+UICareer.lobby.render()                        // refresh from current state
+UICareer.lobby._buildCard(item)                // (private) build one card
+UICareer.lobby.onRegisterClick(id, date)       // calls TournamentSystem.register
+UICareer.lobby._showStatus(msg, isError?)      // 4-second flash banner
+```
+
+`render()` calls `TournamentSystem.getEligibleInstancesForYear(today.year)`
+and rebuilds every card. After a successful register, the lobby
+re-renders so the new event's button switches to "Locked" if the
+fee dropped the player below another tournament's threshold (and the
+new event also appears in the home calendar grid as a red dot).
+
+**Sound feedback.**
+- Browse tournaments → `playSFActivate()`
+- Register success → `playGoodMove(2)`
+- Register failure → `playBlunder()`
+- Lobby back → `playMove()`
+
+**Home screen integration.**
+
+- New `#btn-browse-tournaments` primary action button between the
+  upcoming events list and the dev row, styled as a gold accent
+  button. Above the placeholder dev buttons.
+- The dev row keeps `Play test game` and `Reset career` for now —
+  they'll shrink as Phase C/D/E ship real features.
+
+**Event prompt — tournament_start specialization.**
+
+- The event prompt body now reads tournament-specific copy when
+  the event type is `tournament_start`: rounds, city, country,
+  duration, plus a note that C.3b will replace the auto-play with
+  interactive board play.
+
+**C.3a temporary auto-play (`_autoPlayTournament`).**
+
+When the player dismisses a `tournament_start` event:
+
+1. `TournamentSystem.startTournament(payload)` builds the field
+2. The system runs `recordPlayerResult` for every round with a
+   random outcome (0/0.5/1)
+3. `TournamentSystem.finalize()` pays the prize and records history
+4. The home `#career-continue-status` line shows the result:
+   `<TournamentName>: <rank>/<of> · score X · prize $Y`
+5. Sound: `playVictory` if there's a prize, otherwise `playFlowExit`
+
+**This is a temporary path.** It exists so the user has a complete
+end-to-end loop in C.3a without waiting for C.3b. C.3b replaces it
+with a real in-tournament screen wired to the chess board, where
+each round is played interactively with `UIManager.onGameEnd` →
+`recordPlayerResult`.
+
+**Files touched.**
+- `index.html` — `#screen-lobby` markup, `#btn-browse-tournaments`
+  primary action button, `.career-primary-row` container.
+- `css/career.css` — `.career-primary-row` / `.career-primary-btn`
+  styles + a full "Tournament lobby screen" section (~200 new lines):
+  layout, status banner, cards grid, card details, eligibility states.
+- `js/ui-career.js` — `'lobby'` added to `SCREENS`, full
+  `UICareer.lobby` sub-namespace (render + _buildCard +
+  onRegisterClick + _showStatus), `COUNTRY_FLAGS` and
+  `REASON_LABELS` tables, button bindings for browse / lobby back,
+  `home._openEventPrompt` shows tournament-specific copy,
+  `home.onEventDismiss` calls `_autoPlayTournament` for tournament
+  events, `_autoPlayTournament` helper.
+- `CLAUDE.md` — Phase C.3a marked ✅; C.3b sub-task explicit.
+
+**How to test (full C.3a → C.2 loop).**
+
+1. Reset career: `localStorage.removeItem('chess_life_career_v2'); location.reload();`
+2. Create a character (any nationality)
+3. Click `🏆 Browse tournaments` on the home screen
+4. Browse the cards. Note that:
+   - All Tier 1 events are eligible (you're at 800 Elo, fee small)
+   - Most Tier 2 events are red (Elo too low)
+5. Click `Register` on a Tier 1 event (e.g. Local Weekend Open)
+6. Status banner: `Registered for the 2026 edition.`
+7. Money decreased by entry fee
+8. Click `← Back to home`
+9. The next instance of that tournament is now a red dot on the
+   calendar grid + a row in upcoming events
+10. Click `Continue ▶` repeatedly until the calendar reaches the
+    tournament date → modal `event_prompt` opens with tournament copy
+11. Click `OK` → auto-play kicks in: tournament played, prize paid,
+    calendar advances by `daysDuration`, home re-renders, the
+    continue-status line shows `<name>: <rank>/<of> · score X · prize $Y`
+12. Check `cl.state.history.tournaments` in the console to see the
+    summary row
+
+---
+
+### Phase C.2b — Tournament run loop: pairings, simulation, payouts (2026-04-10)
+
+Third slice of Phase C: turns a registered tournament into a playable
+multi-round event with simulated NPC results, persistent state across
+the rounds, prize payouts, and history records. The actual board UI
+integration (the player playing each round on the existing chess
+board) lands in C.3 — this slice provides the API.
+
+**New schema slot.** `CareerManager.calendar.currentTournament` —
+nullable; holds the live in-tournament state when the calendar phase
+is `in_tournament`. Defensive migration in `_fillDefaults` ensures
+older saves get the slot on init.
+
+**`tournament-system.js` extensions.**
+
+- **`startTournament(eventPayload)`.** Called when the player
+  consumes a `tournament_start` calendar event (the wiring lives in
+  C.3). Builds the field — the player at index 0 plus
+  `max(8, rounds × 8)` opponents generated via the C.2a
+  `generateOpponent` (so a 5-round event has 40 players, a 9-round
+  event 72). Pairs round 1, sets `calendar.phase = 'in_tournament'`,
+  persists, and returns the live instance.
+
+- **`getCurrentInstance()`.** Returns
+  `CareerManager.calendar.currentTournament` (or `null`).
+
+- **`getCurrentPlayerPairing()`.** Returns
+  `{ opponent, color: 'w'|'b'|'bye' }` for the player's pairing in
+  the current round, or `null` if no tournament is in progress.
+
+- **`recordPlayerResult(score)`.** `score ∈ {0, 0.5, 1}` from the
+  player's perspective. The system applies the player's result, then
+  walks every other pairing in the round and **simulates NPC vs NPC**
+  with an Elo-based probability model:
+  - `E = 1 / (1 + 10 ** ((eloB - eloA) / 400))`
+  - 30% flat draw rate (chess Swiss baseline)
+  - Otherwise winner is sampled by `r < E`
+
+  Scores and `opponentsFaced` lists are updated for everyone, the
+  round is appended to `instance.history`, and the next round's
+  pairings are computed (or `null` when finished). Throws on an
+  invalid score.
+
+- **`isFinished()`.** True when `currentRound > rounds`.
+
+- **`getStandings()`.** Returns the field sorted by `score` desc,
+  then by `elo` desc as a simple tiebreak. Each entry gets a
+  `rank` field (1-based).
+
+- **`finalize()`.** Throws if the tournament isn't finished.
+  Otherwise:
+  1. Computes the player's final rank from `getStandings()`
+  2. Pays `tournament.prizes[rank - 1]` to the player via
+     `CareerManager.finances.addIncome()` (zero if outside the
+     paying ranks — no penalty)
+  3. Pushes a summary into `CareerManager.history.tournaments`:
+     `{ tournamentId, tournamentName, city, country, startDate,
+        rounds, rank, of, score, prize, date }`
+  4. Advances the calendar by `daysDuration` days via
+     `CalendarSystem.addDays`
+  5. Resets `phase = 'idle'`, clears `currentTournament` and
+     `currentEvent`, persists
+  6. Returns `{ rank, score, prize, of }`
+
+**Simplified Swiss pairings (`_pairRound`).** Monrad-style minimal:
+
+1. Sort the field by score desc, then by Elo desc
+2. Iterate top-to-bottom; for each unpaired player, find the next
+   unpaired player they have not faced and pair them
+3. If everyone left has been faced (small fields, late rounds), accept
+   a rematch with the closest unpaired player to keep the round
+   running
+4. Last unpaired player (odd field) gets a **bye** = 1 point gift,
+   no opponent recorded
+5. Color assignment alternates by pairing index for variety
+   (full color balancing across rounds is deferred — see
+   "future refactors" below)
+
+**Tests.** 22 new C.2b tests bring the suite to **49 total**, all
+green. New coverage:
+- field size invariants for short and long tournaments
+- player at field[0] with the right Elo
+- calendar phase transition on start
+- round 1 pairings: full coverage, exact partition, player in
+  exactly one pairing
+- `getCurrentPlayerPairing` shape and null safety
+- score accumulation across multiple rounds
+- `opponentsFaced` tracking
+- full tournament loop reaches `isFinished() === true`
+- player faces ≥4 unique opponents over 5 rounds
+- invalid score throws
+- standings sort order and rank labelling
+- `finalize` rejects unfinished tournaments
+- `finalize` pays the prize bucket for the player's rank
+- `finalize` records a row in history
+- `finalize` advances the calendar by `daysDuration`
+- `finalize` returns to idle and clears `currentTournament`
+- `finalize` works on a Tier 2 (Cappelle, 9 rounds) tournament
+
+Run with `node tests/tournament-system.test.js`.
+
+**Out of scope (kept for later).**
+- Color balancing across rounds (current alternation is
+  pairing-index-based, not history-aware)
+- Buchholz / Sonneborn-Berger tiebreaks (current tiebreak is Elo)
+- Player fatigue or focus drain across long Swiss events
+- Reading the actual chess board result from `UIManager.onGameEnd`
+  — happens in C.3 when the in-tournament screen wires up
+
+**Files touched.**
+- `js/career-manager.js` — `currentTournament: null` added to the
+  default `calendar` block; `_fillDefaults` defensively backfills it
+  on older saves.
+- `js/tournament-system.js` — extended with the C.2b API
+  (~330 new lines: pairing helper, NPC simulation, run loop,
+  finalize, history glue). Module is now ~700 lines total — still
+  comfortable in one file.
+- `tests/tournament-system.test.js` — 22 new tests, mock surface
+  expanded to cover `CareerManager.calendar`, `CareerManager.history`,
+  `addIncome`, and `CalendarSystem.addDays`.
+- `CLAUDE.md` — Phase C.2b marked ✅; pointer to color-balancing
+  refactor noted in the deferred section.
+
+**Try it in the console** (after creating a character):
+```js
+// Register and trigger continue to reach the tournament_start event
+cl.tournamentSystem.register('local_weekend_open', 2026)
+cl.calendar.continue()              // → stoppedBy: 'event'
+cl.calendar.getCurrentEvent()        // → the tournament_start event
+
+// Simulate consuming the event (C.3 will wire this in via UI)
+const ev = cl.calendar.getCurrentEvent()
+cl.tournamentSystem.startTournament(ev.payload)
+cl.tournamentSystem.getCurrentPlayerPairing()
+// → { opponent: { name, elo, ... }, color: 'w' }
+
+// Play the rounds (random outcomes for the test)
+for (let i = 0; i < 5; i++) {
+  cl.tournamentSystem.recordPlayerResult([0, 0.5, 1][Math.floor(Math.random()*3)])
+}
+cl.tournamentSystem.isFinished()     // → true
+cl.tournamentSystem.getStandings().slice(0, 5)
+cl.tournamentSystem.finalize()        // → { rank, score, prize, of }
+cl.state.history.tournaments         // → [{...the played tournament...}]
+cl.state.calendar.phase              // → 'idle'
+```
+
+---
+
+### Phase C.2a — Tournament system: registration and lobby data (2026-04-10)
+
+Second slice of Phase C: the orchestration layer that turns the
+static catalogue into actionable in-game tournaments. Phase C.2a
+delivers everything *up to* the player entering a tournament — home
+template resolution, opponent generation, registration with money
+and Elo barriers, and lobby data preparation. The actual round play
+(Swiss pairings, run loop, payouts) lands in C.2b.
+
+**New module: `js/tournament-system.js`.**
+
+- **Home city resolution.** Static `HOME_CITIES` table maps every
+  ISO country code from the character creator to a default home
+  city (NO → Oslo, FR → Paris, US → New York, JP → Tokyo, …).
+  `resolve(tournamentId)` reads the player's nationality and fills
+  in city + country for `home: true` templates. Fixed-location
+  tournaments are returned unchanged.
+
+- **Opponent name pool.** Hand-curated `NAMES` dictionary with ~8
+  first names + 8 last names per country for 20 chess nations
+  (FR, GB, EN, US, DE, NL, RU, IN, CN, ES, PL, UA, AM, AZ, CZ, HU,
+  SE, DK, IT, NO). Generic `NAMES_FALLBACK` for unknown countries.
+  Real-feeling names beat generic placeholders.
+
+- **`generateOpponent(tournament, hostCountry)`.** Returns
+  `{ id, name, elo, nationality }`. Tier 1 home events draw 90% of
+  opponents from the host country and 10% international visitors;
+  Tier 2 international opens use 60/40. Elo is uniform within
+  `[eloMin, eloMax]`, biased toward the middle of the window.
+
+- **`canRegister(id)` — entry barriers.** Returns
+  `{ ok, reasons, warnings }`.
+  - **Hard barriers** (block registration):
+    - `'unknown_tournament'` — id not in catalogue
+    - `'elo_too_low'`        — `playerElo < tournament.eloMin`
+    - `'cant_afford'`        — `playerMoney < tournament.entryFee`
+  - **Soft warning** (does not block):
+    - `'below_your_level'`   — `playerElo > tournament.eloMax`
+
+  This is the answer to "we don't want the player to access the
+  best tournaments right away": the data already encoded
+  `eloMin` and `entryFee`; this function enforces them at
+  registration time.
+
+- **`register(id, year)`.**
+  - Calls `canRegister`. If blocked, returns
+    `{ ok: false, error: '<reason>' }` and does NOT touch finances.
+  - Otherwise finds the next future start date for this tournament
+    in `year`, deducts the entry fee via
+    `CareerManager.finances.addExpense`, and schedules a single
+    `tournament_start` calendar event with full instance metadata
+    in the payload (`tournamentId`, resolved `city`/`country`,
+    `year`, `isHome`, `rounds`, `duration`).
+  - Returns `{ ok: true, eventId }` on success, or
+    `{ ok: false, error }` on failure (`'no_future_instance_this_year'`,
+    `'cant_afford'`, etc.).
+  - **Single calendar event per tournament.** A 9-round tournament
+    that spans 9 days does not produce 9 events. The player consumes
+    one `tournament_start` event, the run loop in C.2b plays every
+    round back-to-back, and the calendar advances `daysDuration`
+    days at the end. Avoids cluttering the calendar with per-round
+    markers.
+
+- **`getEligibleInstancesForYear(year)`.** Builds the lobby view —
+  every tournament instance from today onwards in the given year,
+  each annotated with the resolved tournament metadata and a fresh
+  `canRegister` verdict. The home Tier 1 templates always surface
+  regardless of player nationality (they're resolved against the
+  current player).
+
+**Tests (`tests/tournament-system.test.js`).** 27 tests, all green.
+The harness loads `tournament-data.js` for real and mocks the small
+surfaces of `CareerManager` (player + finances) and `CalendarSystem`
+(getDate, compareDates, scheduleEvent).
+
+Coverage:
+- home resolution: NO → Oslo, FR → Paris, ZZ → Hometown fallback
+- non-home tournaments leave city/country untouched
+- opponent generation: required fields, Elo within range, name shape,
+  fallback safety
+- canRegister: unknown id, success path, both hard barriers in
+  isolation and combined, soft warning, low-elo home reachability
+- register: deducts on success, leaves finances untouched on failure,
+  resolves city in payload, picks next valid date when current month
+  is past, errors when no future instance in the requested year
+- lobby (`getEligibleInstancesForYear`): no past dates leak,
+  shape integrity, home instances always surface for any nationality
+  (NO/JP/BR/IR/AU/ZZ)
+
+Run with `node tests/tournament-system.test.js`.
+
+**Files touched.**
+- New: `js/tournament-system.js` (~360 lines: ~80 data, ~80 helpers,
+  ~200 public API).
+- New: `tests/tournament-system.test.js` (27 tests).
+- `index.html` — `<script>` for `tournament-system.js` after
+  `tournament-data.js`, before `avatar-data.js`.
+- `CLAUDE.md` — Phase C.2a marked ✅.
+
+`window.cl.tournamentSystem` debug shortcut added.
+
+**Try it in the console** (after creating a character):
+```js
+cl.tournamentSystem.resolve('local_weekend_open')
+// → { ..., city: 'Oslo', country: 'NO', home: true }  (for a Norwegian)
+
+cl.tournamentSystem.canRegister('cappelle')
+// → { ok: false, reasons: ['elo_too_low'], warnings: [] }  (at 800 Elo)
+
+cl.tournamentSystem.canRegister('local_weekend_open')
+// → { ok: true, reasons: [], warnings: [] }
+
+cl.tournamentSystem.register('local_weekend_open', 2026)
+// → { ok: true, eventId: 'ev_xxx' }
+//   then check: cl.calendar.getUpcomingEvents()
+
+cl.tournamentSystem.getEligibleInstancesForYear(2026).length
+// → ~30+ depending on what's still in the future
+```
+
+---
+
+### Phase C.1 — Tournament catalogue (2026-04-10)
+
+First slice of Phase C: a static, pure-data catalogue of real and
+fictional chess tournaments at Tier 1 (local amateur) and Tier 2
+(national / entry-level international). No tournament logic yet —
+that lands in C.2 (`tournament-system.js`).
+
+**New module: `js/tournament-data.js`.**
+
+Catalogue holds **24 tournaments** — 6 universal Tier 1 templates
+plus 18 real Tier 2 tournaments across 11 countries. Inspired by the
+real annual chess calendar (data sourced from FIDE, the chess
+festival sites, and the Continental Chess Association in the US).
+
+- **Tier 1 — universal "home country" templates (6 tournaments)**
+
+  These ALWAYS appear in the player's calendar regardless of which
+  nationality they picked at character creation. The
+  tournament-system (C.2) localizes the city/country at instance
+  time using the player's home country, so a Norwegian player gets
+  the same six events scheduled "at home" in Oslo, an American gets
+  them in their home city, etc.
+
+  | Template | Frequency | Elo | Rounds | Days | Fee |
+  |---|---|---|---|---|---|
+  | Local Weekend Open      | 12×/year | 0-1400  | 5 | 2 | 10 |
+  | Sunday Rapid            | 10×/year | 0-1300  | 7 | 1 |  8 |
+  | New Year Open           | annual (Jan 4)  | 0-1500  | 6 | 3 | 18 |
+  | Summer Holiday Open     | annual (Jul 22) | 0-1500  | 7 | 5 | 20 |
+  | Autumn Classic          | annual (Oct 17) | 0-1400  | 6 | 2 | 15 |
+  | Regional Championship   | annual (Nov 21) | 1000-1600 | 7 | 4 | 25 |
+
+  Schema flag: `home: true`, with `city: null` and `country: null`.
+
+- **Tier 2 — real national / international amateur opens (18 tournaments)**
+
+  Real-world tournaments at fixed locations and historical annual dates.
+  Plausible Elo windows and prize pools based on each event's actual size.
+
+  | Tournament | Country | Month | Rounds | Source |
+  |---|---|---|---|---|
+  | Tata Steel Tienkampen          | NL | Jan 23  | 9  | tatasteelchess.com |
+  | Moscow Open                    | RU | Jan 28  | 9  | FIDE calendar |
+  | Cappelle-la-Grande Open        | FR | Feb 18  | 9  | annual since 1985 |
+  | Prague Challengers Open        | CZ | Feb 25  | 9  | Prague Chess Festival |
+  | Atlantic City Open             | US | Mar 27  | 7  | Continental Chess Association |
+  | Grenke Chess Open              | DE | Apr 2   | 9  | Easter weekend, Karlsruhe |
+  | World Open (Under 1600)        | US | Jun 30  | 9  | World Open, Philadelphia |
+  | Czech Open                     | CZ | Jul 17  | 9  | Pardubice multi-section festival |
+  | Biel Amateur Tournament        | CH | Jul 18  | 7  | Biel International Chess Festival |
+  | Andorra Open                   | AD | Jul 19  | 9  | Escaldes-Engordany |
+  | Vienna Open                    | AT | Jul 21  | 9  | Vienna Chess Festival |
+  | Politiken Cup                  | DK | Jul 26  | 10 | Helsingør Konventum |
+  | British Major Open             | GB | Jul 28  | 9  | British Chess Championship |
+  | Continental Open               | US | Aug 12  | 7  | Sturbridge MA |
+  | Avignon International Open     | FR | Aug 17  | 9  | Provençal late-summer open |
+  | French Amateur Championship    | FR | Aug 22  | 9  | Vichy national title |
+  | North American Open            | US | Dec 26  | 7  | Las Vegas, US Chess Grand Prix |
+  | Hastings Challengers           | GB | Dec 28  | 9  | running since 1895 |
+
+**Schema (per tournament).**
+```text
+id, name, city, country (ISO), tier,
+eloMin, eloMax,        // soft cap — beyond eloMax the field is too weak
+rounds, pairingSystem, // 'swiss' is the only system supported in C
+daysDuration,          // total span in calendar days
+entryFee,              // money charged at registration
+prizes,                // array of payouts by final rank (index 0 = first)
+annualDates,           // [{ month, day }, ...] — every START date in a year
+description            // one-liner shown in the lobby
+```
+
+**Public API.**
+```text
+TournamentData.getAll()                          → live array (do not mutate)
+TournamentData.getById(id)                       → object | null
+TournamentData.getByTier(tier)                   → object[]
+TournamentData.getHomeTemplates()                → object[] (Tier 1 universal)
+TournamentData.getFixedLocationTournaments()     → object[] (Tier 2 real-world)
+TournamentData.getEligible(playerElo)            → object[] within [eloMin, eloMax]
+TournamentData.getPrizePool(id)                  → sum of every payout
+TournamentData.getInstancesForYear(year)         → sorted [{ tournamentId, date }, ...]
+TournamentData.getCount()                        → number
+```
+
+`getInstancesForYear` is the key function for Phase C.2 — it expands
+every tournament's `annualDates` into concrete CalendarDate instances
+for a given year, sorted ascending. The tournament system will call
+this when populating the calendar at the start of every game year.
+
+**Tests (`tests/tournament-data.test.js`).** 26 tests, all green.
+Coverage:
+- catalogue integrity (required fields, unique ids, valid tier)
+- home flag invariants: every Tier 1 must be a home template,
+  no Tier 2 can be a home template, getHomeTemplates and
+  getFixedLocationTournaments partition the catalogue
+- city/country validation: required strings unless home === true,
+  in which case both must be `null`
+- monotone descending prizes (rank 1 ≥ rank 2 ≥ … rank N)
+- valid month/day across every annual date
+- positive rounds / daysDuration / entryFee
+- lookups by id and tier (including unknown id)
+- eligibility windows for elo 800 / 1500 / 2500
+- prize pool sums
+- per-year instance generation: sortedness, year correctness,
+  monthly count (12 entries for Local Weekend Open), total instance count
+
+Run with `node tests/tournament-data.test.js`.
+
+**Files touched.**
+- New: `js/tournament-data.js` (~250 lines, mostly data).
+- New: `tests/tournament-data.test.js` (22 tests).
+- `index.html` — `<script>` for `tournament-data.js` after
+  `calendar-system.js`, before `avatar-data.js`.
+- `CLAUDE.md` — Phase C.1 marked ✅; C.2/C.3/C.4 sub-tasks listed.
+
+`window.cl.tournaments` debug shortcut added.
+
+---
+
 ### Phase B.6 — Phase B polish (2026-04-10)
 
 Final pass on the Phase B career loop. No new modules — small polish

@@ -355,6 +355,15 @@ const CalendarSystem = (() => {
       return _state().events.slice(0, n);
     },
 
+    /**
+     * @returns {CalendarEvent[]} a shallow copy of the full event queue.
+     *   Callers should treat the returned array as read-only —
+     *   mutations must go through scheduleEvent / removeEvent.
+     */
+    getAllEvents() {
+      return _state().events.slice();
+    },
+
     /** @returns {number} the total number of scheduled events. */
     getEventCount() {
       return _state().events.length;

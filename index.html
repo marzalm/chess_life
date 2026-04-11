@@ -167,12 +167,110 @@
       <div id="career-upcoming-list" class="career-upcoming-list"></div>
     </div>
 
-    <!-- Dev / test row (Phase B placeholder, removed in Phase C) -->
+    <!-- Primary actions -->
+    <div class="career-primary-row">
+      <button id="btn-browse-tournaments" class="career-primary-btn">🏆 Browse tournaments</button>
+    </div>
+
+    <!-- Dev / test row (will shrink as Phase C/D/E ship real features) -->
     <div class="career-dev-row">
       <button id="btn-play-test-game" class="career-dev-btn">▶ Play test game</button>
       <button id="btn-reset-career" class="career-dev-btn">↺ Reset career</button>
     </div>
 
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: TOURNAMENT LOBBY
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-lobby" class="hidden">
+    <button id="btn-lobby-back" class="lobby-back-btn" type="button">← Back to home</button>
+
+    <div class="lobby-wrap">
+      <h1 class="lobby-title">Upcoming Tournaments</h1>
+      <div id="lobby-summary" class="lobby-summary">—</div>
+      <div id="lobby-status" class="lobby-status hidden"></div>
+      <div id="lobby-cards" class="lobby-cards"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: IN-TOURNAMENT
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-tournament" class="hidden">
+
+    <div class="t-wrap">
+
+      <!-- Header with tournament name + round progress -->
+      <div class="t-header">
+        <div class="t-header-left">
+          <div id="t-name" class="t-name">—</div>
+          <div id="t-location" class="t-location">—</div>
+        </div>
+        <div class="t-header-right">
+          <div class="t-stat">
+            <span class="t-stat-label">Round</span>
+            <span id="t-round" class="t-stat-value">—/—</span>
+          </div>
+          <div class="t-stat">
+            <span class="t-stat-label">Score</span>
+            <span id="t-score" class="t-stat-value">—</span>
+          </div>
+          <div class="t-stat">
+            <span class="t-stat-label">Rank</span>
+            <span id="t-rank" class="t-stat-value">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Next round card (shown while in progress) -->
+      <div id="t-next-round" class="t-next-round">
+        <div class="t-section-title">Next round</div>
+        <div class="t-pairing">
+          <div class="t-pairing-side">
+            <div class="t-pairing-label">You</div>
+            <div id="t-you-name" class="t-pairing-name">—</div>
+            <div id="t-you-elo"  class="t-pairing-elo">—</div>
+          </div>
+          <div class="t-pairing-vs">
+            <div id="t-color" class="t-color-indicator">W</div>
+            <div>vs</div>
+          </div>
+          <div class="t-pairing-side">
+            <div class="t-pairing-label">Opponent</div>
+            <div id="t-opp-name" class="t-pairing-name">—</div>
+            <div id="t-opp-elo"  class="t-pairing-elo">—</div>
+          </div>
+        </div>
+        <button id="btn-play-round" class="t-play-btn">▶ Play round</button>
+      </div>
+
+      <!-- Finished panel (shown after the last round) -->
+      <div id="t-finished" class="t-finished hidden">
+        <div class="t-section-title">Tournament finished</div>
+        <div id="t-final-message" class="t-final-message">—</div>
+        <button id="btn-finalize" class="t-finalize-btn">Finalize & return home ↩</button>
+      </div>
+
+      <!-- Current round pairings (bracket) -->
+      <div id="t-pairings" class="t-pairings">
+        <div class="t-section-title">Round <span id="t-pairings-round">—</span> pairings</div>
+        <div id="t-pairings-list" class="t-pairings-list"></div>
+      </div>
+
+      <!-- Standings -->
+      <div class="t-standings">
+        <div class="t-section-title">Standings</div>
+        <div id="t-standings-list" class="t-standings-list"></div>
+      </div>
+
+      <!-- Round history -->
+      <div class="t-history">
+        <div class="t-section-title">Round history</div>
+        <div id="t-history-list" class="t-history-list"></div>
+      </div>
+
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
@@ -187,14 +285,21 @@
 
       <!-- Left sidebar -->
       <div id="sidebar">
-        <div id="player-info">
-          <div class="label">Your Elo</div>
-          <div id="player-elo">800</div>
+        <div id="player-info" class="game-id-card">
+          <div id="player-avatar-slot" class="game-id-avatar"></div>
+          <div class="game-id-text">
+            <div class="label">You</div>
+            <div id="player-name-label" class="game-id-name">—</div>
+            <div id="player-elo">800</div>
+          </div>
         </div>
-        <div id="opponent-info">
-          <div class="label">Opponent</div>
-          <div id="opponent-name">—</div>
-          <div id="opponent-elo">—</div>
+        <div id="opponent-info" class="game-id-card">
+          <div id="opponent-avatar-slot" class="game-id-avatar"></div>
+          <div class="game-id-text">
+            <div class="label">Opponent</div>
+            <div id="opponent-name" class="game-id-name">—</div>
+            <div id="opponent-elo">—</div>
+          </div>
         </div>
         <div id="focus-section">
           <div class="label">Focus</div>
@@ -231,6 +336,13 @@
           <div id="board"></div>
         </div>
         <div id="captured-white"></div>
+        <div id="board-nav">
+          <button id="btn-nav-start" class="board-nav-btn" title="First move">⏮</button>
+          <button id="btn-nav-prev"  class="board-nav-btn" title="Previous move">◀</button>
+          <span id="board-nav-label" class="board-nav-label">Live</span>
+          <button id="btn-nav-next"  class="board-nav-btn" title="Next move">▶</button>
+          <button id="btn-nav-live"  class="board-nav-btn" title="Back to live">⏭</button>
+        </div>
       </div>
 
       <!-- Right move history -->
@@ -342,6 +454,9 @@
   <script src="js/focus-system.js"></script>
   <script src="js/career-manager.js"></script>
   <script src="js/calendar-system.js"></script>
+  <script src="js/tournament-data.js"></script>
+  <script src="js/name-pools.js"></script>
+  <script src="js/tournament-system.js"></script>
   <script src="js/avatar-data.js"></script>
   <script src="js/dialog-system.js"></script>
   <script src="js/chess-engine.js"></script>

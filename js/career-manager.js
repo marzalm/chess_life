@@ -147,10 +147,11 @@ const CareerManager = (() => {
       elo: 800,
     },
     calendar: {
-      date:         { year: 2026, month: 4, day: 10 },
-      phase:        'idle',
-      events:       [],
-      currentEvent: null,
+      date:              { year: 2026, month: 4, day: 10 },
+      phase:             'idle',
+      events:            [],
+      currentEvent:      null,
+      currentTournament: null,
     },
     focus: {
       current: 100,
@@ -207,10 +208,15 @@ const CareerManager = (() => {
   /**
    * Fill any missing top-level keys with defaults. Protects against
    * older saves that predate the arrival of a new domain.
+   * Also fills nested calendar keys that arrived after Phase B.
    */
   function _fillDefaults(s) {
     for (const [key, val] of Object.entries(DEFAULT_STATE)) {
       if (s[key] === undefined) s[key] = _clone(val);
+    }
+    // Phase C.2b — currentTournament slot may be missing on older saves
+    if (s.calendar && s.calendar.currentTournament === undefined) {
+      s.calendar.currentTournament = null;
     }
     return s;
   }
