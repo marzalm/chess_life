@@ -476,6 +476,17 @@
 
 #puzzle-mode-banner:not(.hidden) { display: block; }
 
+.puzzle-banner-main,
+.puzzle-banner-turn {
+  display: block;
+}
+
+.puzzle-banner-turn {
+  margin-top: 4px;
+  font-size: 8px;
+  color: var(--px-text-dim);
+}
+
 .puzzle-fuse-bar {
   width: 14px;
   height: 576px;

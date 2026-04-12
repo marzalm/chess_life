@@ -19,6 +19,7 @@
 const UICareer = (() => {
 
   const SIMULATE_TOAST_MS = 900;
+  const TRAINING_PUZZLE_OPPONENT_DELAY_MS = 500;
 
   // ── Screen router ─────────────────────────────────────────
 
@@ -476,6 +477,7 @@ const UICareer = (() => {
   let _activeTrainingSession = null;
   let _trainingRuntime = null;
   let _trainingSummaryReady = false;
+  let _soloPracticeResult = '';
 
   function _coachFlag(code) {
     return COUNTRY_FLAGS[code] || '🏳️';
@@ -706,42 +708,54 @@ const UICareer = (() => {
         return;
       }
 
+      const coachThemes = coach && Array.isArray(coach.primaryThemes)
+        ? coach.primaryThemes
+        : [];
+      const soloThemes = PuzzleSystem.getThemes().filter((theme) => !coachThemes.includes(theme));
+
       if (coachPanel) {
-        coachPanel.classList.remove('hidden');
-        coachPanel.innerHTML = coach
-          ? this._buildThemePanel(
+        if (coach) {
+          coachPanel.classList.remove('hidden');
+          coachPanel.innerHTML = this._buildThemePanel(
               'With your coach',
               `Coach bonus: +${coach.bonusMoves} Stockfish moves on these themes.`,
-              coach.primaryThemes,
+              coachThemes,
               true,
-            )
-          : `
+              'Start session',
+            );
+        } else {
+          coachPanel.classList.remove('hidden');
+          coachPanel.innerHTML = `
             <div class="training-panel-title">With your coach</div>
             <div class="training-panel-empty">Hire a coach to unlock guided theme sessions.</div>
           `;
+        }
       }
 
       if (selfPanel) {
         selfPanel.classList.remove('hidden');
-        selfPanel.innerHTML = this._buildThemePanel(
-          'Self-training',
-          'Available every day, any theme, no coach bonus.',
-          PuzzleSystem.getThemes(),
-          false,
-        );
+        selfPanel.innerHTML = this._buildSoloPracticePanel();
       }
 
       this.bindThemeButtons();
     },
 
-    _buildThemePanel(title, subtitle, themes, coached) {
+    _buildThemePanel(title, subtitle, themes, coached, buttonLabel) {
+      if (!themes.length) {
+        return `
+          <div class="training-panel-title">${title}</div>
+          <div class="training-panel-subtitle">${subtitle}</div>
+          <div class="training-panel-empty">No themes available here right now.</div>
+        `;
+      }
+
       const items = themes.map((theme) => {
         const verdict = PuzzleSystem.canStartTrainingSession(theme);
         const status = PuzzleSystem.getTrainingBonusStatus(theme);
         const disabled = !verdict.ok;
         const label = status.lockedUntilTournamentEnd
           ? 'Prepared for next tournament'
-          : 'Start session';
+          : buttonLabel;
         return `
           <div class="training-theme-row">
             <div class="training-theme-text">
@@ -762,10 +776,33 @@ const UICareer = (() => {
       `;
     },
 
+    _buildSoloPracticePanel() {
+      const result = _soloPracticeResult
+        ? `<div class="training-practice-result">${_soloPracticeResult}</div>`
+        : '';
+      return `
+        <div class="training-panel-title">Solo practice</div>
+        <div class="training-panel-subtitle">No bonus. No rating change. Just practice.</div>
+        <div class="training-theme-list">
+          <div class="training-theme-row">
+            <div class="training-theme-text">
+              <div class="training-theme-name">Random puzzle</div>
+              <div class="training-theme-meta">Drawn from the full 176-puzzle pool. No career impact.</div>
+            </div>
+            <button id="btn-training-practice" class="training-theme-action" type="button">🎲 Random puzzle</button>
+          </div>
+        </div>
+        ${result}
+      `;
+    },
+
     bindThemeButtons() {
       document.querySelectorAll('.training-theme-action').forEach((btn) => {
+        if (btn.id === 'btn-training-practice') return;
         btn.addEventListener('click', () => this.startSession(btn.dataset.theme));
       });
+      const practiceBtn = document.getElementById('btn-training-practice');
+      if (practiceBtn) practiceBtn.addEventListener('click', () => this.startSoloPractice());
     },
 
     startSession(theme) {
@@ -782,12 +819,30 @@ const UICareer = (() => {
       this.render();
     },
 
+    startSoloPractice() {
+      const puzzle = PuzzleSystem.pickRandomPractice();
+      if (!puzzle) return;
+      _soloPracticeResult = '';
+      _trainingSummaryReady = false;
+      _activeTrainingSession = {
+        id: 'solo_practice',
+        mode: 'practice',
+        theme: puzzle.theme,
+        currentPuzzle: puzzle,
+      };
+      this._primeRuntimeFromSession(_activeTrainingSession);
+      if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+      this.render();
+    },
+
     _primeRuntimeFromSession(session) {
       _trainingRuntime = {
         selectedSquare: null,
         phase: 'awaiting-player',
         solutionIndex: 0,
         chess: new Chess(session.currentPuzzle.fen),
+        playerColor: String(session.currentPuzzle.fen).split(' ')[1] === 'b' ? 'b' : 'w',
+        lastMove: null,
       };
     },
 
@@ -798,19 +853,27 @@ const UICareer = (() => {
       const solvedEl = document.getElementById('training-progress-solved');
       const attemptsEl = document.getElementById('training-progress-attempts');
       const statusEl = document.getElementById('training-session-status');
+      const progressRow = document.querySelector('#training-session .training-progress-row');
 
       if (!_activeTrainingSession || !_trainingRuntime) return;
 
-      if (titleEl) titleEl.textContent = `Training — ${PuzzleSystem.getThemeLabel(_activeTrainingSession.theme)}`;
-      if (metaEl) {
-        metaEl.textContent = `Puzzle ${_activeTrainingSession.attemptsUsed + 1} · Theme rating ${PuzzleSystem.getPuzzleRating(_activeTrainingSession.theme)}`;
+      const turnLabel = _trainingRuntime.playerColor === 'b' ? 'Black to move' : 'White to move';
+      if (titleEl) titleEl.textContent = `PUZZLE — ${PuzzleSystem.getThemeLabel(_activeTrainingSession.theme)}`;
+      if (_activeTrainingSession.mode === 'practice') {
+        if (metaEl) metaEl.innerHTML = `<span class="training-session-turn">${turnLabel}</span> · Solo practice`;
+        if (progressRow) progressRow.classList.add('hidden');
+      } else {
+        if (metaEl) {
+          metaEl.innerHTML = `<span class="training-session-turn">${turnLabel}</span> · Puzzle ${_activeTrainingSession.attemptsUsed + 1} · Theme rating ${PuzzleSystem.getPuzzleRating(_activeTrainingSession.theme)}`;
+        }
+        if (progressRow) progressRow.classList.remove('hidden');
+        if (streakEl) streakEl.textContent = `${_activeTrainingSession.streak}/${PuzzleSystem.SESSION_STREAK_TARGET}`;
+        if (solvedEl) solvedEl.textContent = `${_activeTrainingSession.solvedTotal}/${PuzzleSystem.SESSION_SOLVE_TARGET}`;
+        if (attemptsEl) attemptsEl.textContent = `${_activeTrainingSession.attemptsRemaining}/${PuzzleSystem.SESSION_MAX_ATTEMPTS}`;
       }
-      if (streakEl) streakEl.textContent = `${_activeTrainingSession.streak}/${PuzzleSystem.SESSION_STREAK_TARGET}`;
-      if (solvedEl) solvedEl.textContent = `${_activeTrainingSession.solvedTotal}/${PuzzleSystem.SESSION_SOLVE_TARGET}`;
-      if (attemptsEl) attemptsEl.textContent = `${_activeTrainingSession.attemptsRemaining}/${PuzzleSystem.SESSION_MAX_ATTEMPTS}`;
       if (statusEl) {
         statusEl.textContent = _trainingRuntime.phase === 'awaiting-opponent'
-          ? 'Coach line reply...'
+          ? 'Reply...'
           : 'Solve the puzzle. Unlimited time, one attempt.';
       }
 
@@ -823,7 +886,7 @@ const UICareer = (() => {
       board.innerHTML = '';
 
       const getPiece = (sq) => _trainingRuntime.chess.get(sq);
-      const isFlipped = _trainingRuntime.chess.turn() === 'b';
+      const isFlipped = _trainingRuntime.playerColor === 'b';
       const files = isFlipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
       const ranks = isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
       const moves = _trainingRuntime.selectedSquare
@@ -843,6 +906,10 @@ const UICareer = (() => {
           el.className = 'square ' + (isLight ? 'light' : 'dark');
           el.dataset.square = square;
           if (square === _trainingRuntime.selectedSquare) el.classList.add('selected');
+          if (_trainingRuntime.lastMove &&
+              (_trainingRuntime.lastMove.from === square || _trainingRuntime.lastMove.to === square)) {
+            el.classList.add('last-move');
+          }
           if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
           if (captureTargets.includes(square)) el.classList.add('legal-capture');
 
@@ -905,6 +972,7 @@ const UICareer = (() => {
         return;
       }
 
+      _trainingRuntime.lastMove = { from, to: square };
       _trainingRuntime.solutionIndex += 1;
       this._advanceTrainingLine();
     },
@@ -933,6 +1001,7 @@ const UICareer = (() => {
             this._resolveAttempt(false);
             return;
           }
+          _trainingRuntime.lastMove = { from, to };
           _trainingRuntime.solutionIndex += 1;
           if (_trainingRuntime.solutionIndex >= solution.length) {
             this._resolveAttempt(true);
@@ -940,7 +1009,7 @@ const UICareer = (() => {
           }
           _trainingRuntime.phase = 'awaiting-player';
           this._renderSession();
-        }, 500);
+        }, TRAINING_PUZZLE_OPPONENT_DELAY_MS);
         return;
       }
 
@@ -950,6 +1019,18 @@ const UICareer = (() => {
 
     _resolveAttempt(solved) {
       if (!_activeTrainingSession) return;
+      clearTimeout(this._opponentReplyTimer);
+      this._opponentReplyTimer = null;
+      if (_activeTrainingSession.mode === 'practice') {
+        const puzzle = _activeTrainingSession.currentPuzzle;
+        _soloPracticeResult = solved
+          ? 'Correct!'
+          : `Incorrect. Solution: ${this._formatSolutionLine(puzzle)}`;
+        _activeTrainingSession = null;
+        _trainingRuntime = null;
+        this.render();
+        return;
+      }
       const result = PuzzleSystem.submitSessionAnswer(_activeTrainingSession.id, solved);
       _activeTrainingSession = result.session;
 
@@ -986,10 +1067,28 @@ const UICareer = (() => {
       }
     },
 
+    _formatSolutionLine(puzzle) {
+      try {
+        const chess = new Chess(puzzle.fen);
+        return puzzle.solution.map((uci) => {
+          const from = uci.slice(0, 2);
+          const to = uci.slice(2, 4);
+          const promotion = uci.length > 4 ? uci[4] : 'q';
+          const move = chess.move({ from, to, promotion });
+          return move ? move.san : uci;
+        }).join(', ');
+      } catch (_) {
+        return puzzle.solution.join(', ');
+      }
+    },
+
     onReturnHome() {
+      clearTimeout(this._opponentReplyTimer);
+      this._opponentReplyTimer = null;
       _activeTrainingSession = null;
       _trainingRuntime = null;
       _trainingSummaryReady = false;
+      _soloPracticeResult = '';
       if (typeof SoundManager !== 'undefined') SoundManager.playMove();
       _showScreen('home');
       home.render();

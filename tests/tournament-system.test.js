@@ -194,6 +194,10 @@ function assertEq(actual, expected, msg) {
   }
 }
 
+function _deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 console.log('\n── Resolution of home templates ──');
@@ -702,6 +706,34 @@ test('recordPlayerResult emits round_played with source board', () => {
   assert(ev, 'expected round_played event');
   assertEq(ev.payload.source, 'board');
   assertEq(ev.payload.result, 'win');
+});
+
+test('recordPlayerResult updates canonical field entries after mid-round save/reload', () => {
+  TournamentSystem.startTournament(_samplePayload('local_weekend_open'));
+  _calendarState.currentTournament = _deepClone(_calendarState.currentTournament);
+
+  TournamentSystem.recordPlayerResult(1);
+
+  const inst = TournamentSystem.getCurrentInstance();
+  const me = inst.field.find((p) => p.id === 'player');
+  assertEq(me.score, 1, 'player score should update on canonical field entry');
+  assertEq(me.opponentsFaced.length, 1, 'player faced list should update on canonical field entry');
+});
+
+test('full tournament remains consistent across save/reload before every round', () => {
+  TournamentSystem.startTournament(_samplePayload('local_weekend_open'));
+  const scores = [0, 1, 0, 1, 0.5];
+
+  for (const score of scores) {
+    _calendarState.currentTournament = _deepClone(_calendarState.currentTournament);
+    TournamentSystem.recordPlayerResult(score);
+  }
+
+  const inst = TournamentSystem.getCurrentInstance();
+  const me = inst.field.find((p) => p.id === 'player');
+  assertEq(me.score, 2.5, 'player score should equal the sum of recorded round scores');
+  assertEq(me.opponentsFaced.length, 5, 'player should face one opponent per recorded round');
+  assertEq(inst.history.length, 5, 'history should retain one entry per round');
 });
 
 console.log('\n── simulatePlayerRound ──');

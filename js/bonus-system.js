@@ -271,7 +271,7 @@ const BonusSystem = (() => {
   function _showPuzzleBanner(text) {
     const banner = _getPuzzleBanner();
     if (!banner) return;
-    banner.textContent = text;
+    banner.innerHTML = text;
     banner.classList.remove('hidden');
   }
 
@@ -286,6 +286,11 @@ const BonusSystem = (() => {
       (sum, theme) => sum + PuzzleSystem.getTrainingBonusCount(theme),
       0,
     );
+  }
+
+  function _getTurnLabelFromFen(fen) {
+    const parts = String(fen || '').split(' ');
+    return parts[1] === 'b' ? 'Black to move' : 'White to move';
   }
 
   function _pickNextTrainingBonusTheme() {
@@ -428,10 +433,11 @@ const BonusSystem = (() => {
     _state.pendingMoveBudget = 0;
     _state.puzzlePhase = 'awaiting-player';
     _setPuzzleModeActive(true);
+    const turnLabel = _getTurnLabelFromFen(puzzle.fen);
     _showPuzzleBanner(
       themeHidden
-        ? 'PUZZLE — Unknown theme — Solve'
-        : `PUZZLE — ${PuzzleSystem.getThemeLabel(theme)} — Solve to activate`,
+        ? `<span class="puzzle-banner-main">PUZZLE — Unknown theme</span><span class="puzzle-banner-turn">${turnLabel}</span>`
+        : `<span class="puzzle-banner-main">PUZZLE — ${PuzzleSystem.getThemeLabel(theme)}</span><span class="puzzle-banner-turn">${turnLabel}</span>`,
     );
     _startFuseBar(puzzle);
     this.renderInventory();

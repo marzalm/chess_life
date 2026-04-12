@@ -612,6 +612,20 @@ function assertEq(actual, expected, msg) {
     assertEq(BonusSystem.getPuzzleState().theme, 'fork');
   });
 
+  await test('puzzle banner includes side-to-move metadata during invocation', async () => {
+    const puzzle = findPuzzle('fork', (entry) => entry.solution.length >= 2);
+    _trainingState.trainingBonuses.fork = 1;
+    _trainingState.reinforcementQueues.fork = [
+      { puzzleId: puzzle.id, state: 'active', confirmations: 0 },
+    ];
+
+    BonusSystem.invokeBonus('fork');
+    const banner = document.getElementById('puzzle-mode-banner');
+    const turnLabel = String(puzzle.fen).split(' ')[1] === 'b' ? 'Black to move' : 'White to move';
+    assert(banner.innerHTML.includes('PUZZLE'), 'expected puzzle banner content');
+    assert(banner.innerHTML.includes(turnLabel), 'expected turn metadata in puzzle banner');
+  });
+
   await test('entering puzzle mode shows the vertical fuse bar and draining state', async () => {
     const puzzle = findPuzzle('mateIn1', (entry) => entry.solution.length === 1);
     _trainingState.trainingBonuses.mateIn1 = 1;

@@ -9,6 +9,56 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### Tournament stale-reference fix after mid-round save/reload (2026-04-12)
+
+Fixes a tournament corruption bug that could surface after bonus
+invocation or any other save during an active round.
+
+- `TournamentSystem.recordPlayerResult()` no longer mutates the
+  `currentPairings` participant objects directly; it now resolves every
+  participant back to the canonical `field` entry by `id` before
+  updating score and `opponentsFaced`
+- added a defensive pairing re-link step on live tournament access so a
+  deserialized `currentTournament` automatically restores
+  `currentPairings` references to the canonical `field` rows
+- added two regression tests covering mid-tournament save/reload and a
+  full tournament with serialization/deserialization before every round
+
+### E.5 solo practice simplification (2026-04-12)
+
+Quick UX cleanup for the Training Hub.
+
+- replaced the old solo-theme list with a single `🎲 Random puzzle`
+  button under `Solo practice`
+- added `PuzzleSystem.pickRandomPractice()` as a pure random picker over
+  the full shipped puzzle pool, with no seen-tracking, no rating logic,
+  no reinforcement interaction, and no bonus preparation
+- solo practice now runs as a lightweight free-play puzzle on the
+  training board: no calendar cost, no session structure, no save-state
+  mutation, and no mechanical career impact
+- failed solo attempts now return a minimal learning summary with the
+  full solution line rendered in readable move notation
+
+### E.5 playtest fixes (2026-04-12)
+
+Short bugfix pass after the first Training Hub playtest.
+
+- puzzle banners now include side-to-move metadata (`White to move` /
+  `Black to move`) during in-game bonus puzzles, and the training hub
+  session header now shows the same information for coach and solo
+  sessions
+- training multi-move puzzles now keep a stable board orientation based
+  on the puzzle's player color and preserve a visible last-move
+  highlight during the delayed opponent auto-reply, reducing the
+  "board jump" effect between steps
+- the Training Hub now splits coach themes and solo themes correctly:
+  coach section for covered themes, `Solo practice` only for the
+  remaining themes, and both sections respect `lockedUntilTournamentEnd`
+  so prepared themes cannot be double-dipped
+- floating move-eval badges (`Best!`, `Inaccurate`, `Blunder!`, etc.)
+  are restored for normal live play and explicitly suppressed only while
+  puzzle mode or Stockfish playback is actually active
+
 ### E.5: Training Hub, per-theme ratings, and tournament preparation (2026-04-12)
 
 Phase E closes with the missing out-of-game training loop: coach-led or

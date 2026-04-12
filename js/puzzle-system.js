@@ -630,6 +630,12 @@ const PuzzleSystem = (() => {
       return _clone(puzzle);
     },
 
+    pickRandomPractice() {
+      if (!Array.isArray(PUZZLES) || PUZZLES.length === 0) return null;
+      const index = Math.floor(Math.random() * PUZZLES.length);
+      return _clone(PUZZLES[index]);
+    },
+
     canStartTrainingSession(theme) {
       _ensureTheme(theme);
       _normalizeTrainingState();

@@ -921,6 +921,10 @@
   color: var(--px-text-dim);
 }
 
+.training-session-turn {
+  color: var(--px-gold);
+}
+
 .training-theme-list {
   display: flex;
   flex-direction: column;
@@ -969,6 +973,13 @@
   font-size: 8px;
   color: var(--px-text-dim);
   line-height: 1.8;
+}
+
+.training-practice-result {
+  margin-top: 12px;
+  font-size: 8px;
+  line-height: 1.8;
+  color: var(--px-gold);
 }
 
 .training-progress-row {

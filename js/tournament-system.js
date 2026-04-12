@@ -544,7 +544,7 @@ const TournamentSystem = (() => {
         history:         [],
       };
 
-      instance.currentPairings = _pairRound(instance);
+      instance.currentPairings = _relinkCurrentPairings(instance, _pairRound(instance));
 
       // Persist into CareerManager.calendar via live reference
       const cal = CareerManager.calendar.get();
@@ -559,7 +559,10 @@ const TournamentSystem = (() => {
     /** @returns {object | null} the live in-tournament state. */
     getCurrentInstance() {
       const cal = CareerManager.calendar.get();
-      return cal.currentTournament || null;
+      const inst = cal.currentTournament || null;
+      if (!inst) return null;
+      inst.currentPairings = _relinkCurrentPairings(inst, inst.currentPairings);
+      return inst;
     },
 
     /**
@@ -617,31 +620,33 @@ const TournamentSystem = (() => {
       // Walk every pairing of this round, applying or simulating.
       const roundResults = [];
       for (const p of inst.currentPairings) {
+        const whiteEntry = _getCanonicalFieldEntry(inst, p.white && p.white.id);
         if (p.black === null) {
           // Bye → 1 point, no opponent recorded.
-          _addScore(p.white, 1);
-          roundResults.push({ white: p.white.id, black: null, scoreW: 1, scoreB: null });
+          _addScore(whiteEntry, 1);
+          roundResults.push({ white: whiteEntry.id, black: null, scoreW: 1, scoreB: null });
           continue;
         }
+        const blackEntry = _getCanonicalFieldEntry(inst, p.black.id);
 
         let scoreW;
-        if (p.white.id === 'player') {
+        if (whiteEntry.id === 'player') {
           scoreW = playerScore;
-        } else if (p.black.id === 'player') {
+        } else if (blackEntry.id === 'player') {
           scoreW = 1 - playerScore;
         } else {
-          scoreW = _simulateGame(p.white, p.black);
+          scoreW = _simulateGame(whiteEntry, blackEntry);
         }
 
         const scoreB = 1 - scoreW;
-        _addScore(p.white, scoreW);
-        _addScore(p.black, scoreB);
-        _markFaced(p.white, p.black);
-        _markFaced(p.black, p.white);
+        _addScore(whiteEntry, scoreW);
+        _addScore(blackEntry, scoreB);
+        _markFaced(whiteEntry, blackEntry);
+        _markFaced(blackEntry, whiteEntry);
 
         roundResults.push({
-          white: p.white.id,
-          black: p.black.id,
+          white: whiteEntry.id,
+          black: blackEntry.id,
           scoreW,
           scoreB,
         });
@@ -652,7 +657,7 @@ const TournamentSystem = (() => {
 
       const finished = inst.currentRound > inst.rounds;
       if (!finished) {
-        inst.currentPairings = _pairRound(inst);
+        inst.currentPairings = _relinkCurrentPairings(inst, _pairRound(inst));
       } else {
         inst.currentPairings = null;
       }
@@ -858,6 +863,24 @@ const TournamentSystem = (() => {
 
   function _addScore(entry, delta) {
     entry.score = (entry.score || 0) + delta;
+  }
+
+  function _getCanonicalFieldEntry(instance, id) {
+    const entry = instance && instance.field
+      ? instance.field.find((f) => f.id === id)
+      : null;
+    if (!entry) {
+      throw new Error(`[Tournament] Missing field entry for id: ${id}`);
+    }
+    return entry;
+  }
+
+  function _relinkCurrentPairings(instance, pairings) {
+    if (!instance || !Array.isArray(pairings)) return pairings || null;
+    return pairings.map((p) => ({
+      white: p.white ? _getCanonicalFieldEntry(instance, p.white.id) : null,
+      black: p.black ? _getCanonicalFieldEntry(instance, p.black.id) : null,
+    }));
   }
 
   function _markFaced(a, b) {

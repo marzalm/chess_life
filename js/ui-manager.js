@@ -957,11 +957,18 @@ const UIManager = {
 
     const square = this._moveEvalSquares[evalInfo.ply];
     if (square && evalInfo.key !== 'neutral') {
-      this._showFloatingEval(square, evalInfo);
+      setTimeout(() => this._showFloatingEval(square, evalInfo), 0);
     }
   },
 
   _showFloatingEval(square, evalInfo) {
+    if (this._pieceSource !== 'live') return;
+    if (this._puzzleMode) return;
+    if (this._playbackInputLocked) return;
+    if (typeof BonusSystem !== 'undefined') {
+      if (BonusSystem.isInPuzzleMode && BonusSystem.isInPuzzleMode()) return;
+      if (BonusSystem.isPlaybackActive && BonusSystem.isPlaybackActive()) return;
+    }
     const el = document.querySelector(`[data-square="${square}"]`);
     if (!el) return;
 
