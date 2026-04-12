@@ -170,6 +170,14 @@
     <!-- Primary actions -->
     <div class="career-primary-row">
       <button id="btn-browse-tournaments" class="career-primary-btn">🏆 Browse tournaments</button>
+      <button id="btn-open-training" class="career-primary-btn career-primary-btn-training">
+        <span id="career-training-button-label">🏋️ Train</span>
+        <span id="career-training-button-note" class="career-coach-button-note hidden">—</span>
+      </button>
+      <button id="btn-open-coaches" class="career-primary-btn career-primary-btn-coach">
+        <span id="career-coach-button-label">👨‍🏫 Hire a coach</span>
+        <span id="career-current-coach-name" class="career-coach-button-note hidden">—</span>
+      </button>
       <button id="btn-open-inbox" class="career-primary-btn">📬 Inbox <span id="career-inbox-badge" class="career-inbox-badge hidden">0</span></button>
     </div>
 
@@ -179,6 +187,74 @@
       <button id="btn-reset-career" class="career-dev-btn">↺ Reset career</button>
     </div>
 
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: COACHES
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-coaches" class="hidden">
+    <button id="btn-coaches-back" class="coaches-back-btn" type="button">← Back to home</button>
+
+    <div class="coaches-wrap">
+      <div class="coaches-header">
+        <h1 class="coaches-title">Coaches</h1>
+        <div id="coaches-summary" class="coaches-summary">Choose one coach for your career slot.</div>
+      </div>
+
+      <div id="coaches-current-panel" class="coaches-current-panel"></div>
+
+      <div class="coaches-browser-layout">
+        <div id="coaches-grid" class="coaches-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-training" class="hidden">
+    <button id="btn-training-back" class="coaches-back-btn" type="button">← Back to home</button>
+
+    <div class="training-wrap">
+      <div class="training-header">
+        <h1 class="training-title">Training Hub</h1>
+        <div id="training-summary" class="training-summary">—</div>
+        <div id="training-prepared" class="training-prepared">—</div>
+      </div>
+
+      <div id="training-coach-panel" class="training-panel"></div>
+      <div id="training-self-panel" class="training-panel"></div>
+
+      <div id="training-session" class="training-session hidden">
+        <div id="training-session-title" class="training-session-title">Training</div>
+        <div id="training-session-meta" class="training-session-meta">—</div>
+        <div class="training-progress-row">
+          <div class="training-progress-box">
+            <div class="training-progress-label">Streak</div>
+            <div id="training-progress-streak" class="training-progress-value">0/3</div>
+          </div>
+          <div class="training-progress-box">
+            <div class="training-progress-label">Solved</div>
+            <div id="training-progress-solved" class="training-progress-value">0/6</div>
+          </div>
+          <div class="training-progress-box">
+            <div class="training-progress-label">Attempts left</div>
+            <div id="training-progress-attempts" class="training-progress-value">18/18</div>
+          </div>
+        </div>
+
+        <div id="training-session-status" class="training-session-status">Solve the puzzle.</div>
+
+        <div class="training-board-wrap">
+          <div id="training-board-container" class="training-board-container">
+            <div id="training-board" class="training-board"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="training-session-summary" class="training-session-summary hidden">
+        <div id="training-session-summary-title" class="training-session-summary-title">Session complete</div>
+        <div id="training-session-summary-body" class="training-session-summary-body">—</div>
+        <button id="btn-training-summary-home" class="career-primary-btn">Return home</button>
+      </div>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
@@ -369,6 +445,10 @@
           <div class="label">Training bonuses</div>
           <div id="training-bonus-buttons" class="training-bonus-buttons"></div>
         </div>
+        <div id="flow-bonus-section" class="hidden">
+          <div class="label">Flow bonus</div>
+          <div id="flow-bonus-buttons" class="training-bonus-buttons"></div>
+        </div>
         <div id="game-controls">
           <button id="btn-new-game">New game</button>
           <div id="game-status">Start a game to begin.</div>
@@ -379,9 +459,14 @@
       <div id="board-section">
         <div id="captured-black"></div>
         <div id="puzzle-mode-banner" class="hidden">PUZZLE</div>
-        <div id="board-container">
-          <div id="board"></div>
-          <div id="puzzle-outcome-card" class="hidden">Puzzle solved!</div>
+        <div id="board-playfield">
+          <div id="board-container">
+            <div id="board"></div>
+            <div id="puzzle-outcome-card" class="hidden">Puzzle solved!</div>
+          </div>
+          <div id="puzzle-fuse-bar" class="puzzle-fuse-bar hidden">
+            <div id="puzzle-fuse-fill" class="puzzle-fuse-fill"></div>
+          </div>
         </div>
         <div id="captured-white"></div>
         <div id="board-nav">
@@ -412,6 +497,17 @@
       <p id="event-prompt-body">—</p>
       <div class="modal-action justify-center">
         <button id="btn-event-dismiss">OK</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="modal-coach-replace" class="modal">
+    <div class="modal-box w-full max-w-lg">
+      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;">Replace coach?</h3>
+      <p id="coach-replace-body" style="font-family:'Press Start 2P',monospace;font-size:8px;line-height:1.8;">—</p>
+      <div class="modal-action">
+        <button id="btn-coach-replace-cancel" class="btn">Cancel</button>
+        <button id="btn-coach-replace-confirm" class="btn btn-primary">Replace</button>
       </div>
     </div>
   </dialog>
@@ -503,6 +599,8 @@
   <script src="js/career-manager.js"></script>
   <script src="js/calendar-system.js"></script>
   <script src="js/game-events.js"></script>
+  <script src="js/coach-data.js"></script>
+  <script src="js/staff-system.js"></script>
   <script src="js/puzzle-data.js"></script>
   <script src="js/puzzle-system.js"></script>
   <script src="js/tournament-data.js"></script>

@@ -35,6 +35,7 @@ let CareerManager;
 let ChessEngine;
 let UIManager;
 let FocusSystem;
+let StaffSystem;
 let GameEvents;
 let SoundManager;
 let document;
@@ -50,14 +51,16 @@ let _bestMoves;
 let _aiMoves;
 let _statusLog;
 let _aiReplyCalls;
+const REAL_DATE_NOW = Date.now;
 
 function makeDefaultTrainingState() {
   return {
-    aptitudes: {},
     seenPuzzleIds: {},
     reinforcementQueues: {},
     trainingBonuses: {},
     flowBonus: { earned: false, reservedPuzzleId: null },
+    puzzleRatings: {},
+    puzzleRatingRds: {},
     stats: {
       sessionsCompleted: 0,
       sessionsPassed: 0,
@@ -146,12 +149,18 @@ function makeDocument() {
   const ids = [
     'training-bonus-section',
     'training-bonus-buttons',
+    'flow-bonus-section',
+    'flow-bonus-buttons',
     'puzzle-mode-banner',
+    'puzzle-fuse-bar',
+    'puzzle-fuse-fill',
     'puzzle-outcome-card',
   ];
   ids.forEach((id) => elements.set(id, makeElement(id)));
   elements.get('training-bonus-section').classList.add('hidden');
+  elements.get('flow-bonus-section').classList.add('hidden');
   elements.get('puzzle-mode-banner').classList.add('hidden');
+  elements.get('puzzle-fuse-bar').classList.add('hidden');
   elements.get('puzzle-outcome-card').classList.add('hidden');
 
   return {
@@ -174,6 +183,7 @@ function makeGameEventsMock() {
     EVENTS: {
       BONUS_INVOKED: 'bonus_invoked',
       BONUS_RESOLVED: 'bonus_resolved',
+      FLOW_BONUS_EARNED: 'flow_bonus_earned',
     },
     on(eventName, handler) {
       const bucket = listeners.get(eventName) || new Set();
@@ -274,7 +284,7 @@ function loadModules() {
   ))(PUZZLES, CareerManager);
 
   BonusSystem = (new Function(
-    'Chess', 'PuzzleSystem', 'ChessEngine', 'UIManager', 'FocusSystem', 'GameEvents', 'document', 'window', 'SoundManager', 'setTimeout', 'clearTimeout',
+    'Chess', 'PuzzleSystem', 'ChessEngine', 'UIManager', 'FocusSystem', 'StaffSystem', 'GameEvents', 'document', 'window', 'SoundManager', 'setTimeout', 'clearTimeout',
     `${bonusSystemCode}\nreturn BonusSystem;`,
   ))(
     Chess,
@@ -282,6 +292,7 @@ function loadModules() {
     ChessEngine,
     UIManager,
     FocusSystem,
+    StaffSystem,
     GameEvents,
     document,
     windowObj,
@@ -327,6 +338,15 @@ async function clickMove(uci) {
   await flushMicrotasks();
 }
 
+async function solvePuzzleLine(puzzle) {
+  for (let i = 0; i < puzzle.solution.length; i += 2) {
+    await clickMove(puzzle.solution[i]);
+    if (i + 1 < puzzle.solution.length) {
+      await advanceTime(500);
+    }
+  }
+}
+
 function reset() {
   _player = { elo: 1500 };
   _trainingState = makeDefaultTrainingState();
@@ -339,6 +359,7 @@ function reset() {
   _aiMoves = [];
   _statusLog = [];
   _aiReplyCalls = 0;
+  Date.now = () => _now;
 
   CareerManager = {
     player: { get: () => _player },
@@ -374,6 +395,29 @@ function reset() {
       if (this._playbackPaused) return this.current;
       this.current += delta;
       return this.current;
+    },
+    _exitFlow() {
+      if (PuzzleSystem && PuzzleSystem.clearFlowBonus) {
+        PuzzleSystem.clearFlowBonus();
+      }
+      if (BonusSystem && BonusSystem.renderInventory) {
+        BonusSystem.renderInventory();
+      }
+    },
+    _enterFlow(palier = 1) {
+      GameEvents.emit(GameEvents.EVENTS.FLOW_BONUS_EARNED, { flowPalier: palier });
+      if (BonusSystem && BonusSystem.renderInventory) {
+        BonusSystem.renderInventory();
+      }
+    },
+  };
+
+  StaffSystem = {
+    getCurrentCoach() {
+      return null;
+    },
+    getCurrentCoachBonusMoves() {
+      return 0;
     },
   };
 
@@ -472,7 +516,7 @@ function assertEq(actual, expected, msg) {
     const wrap = document.getElementById('training-bonus-buttons');
     assert(!section.classList.contains('hidden'), 'expected visible inventory section');
     assertEq(wrap.children.length, 1);
-    assertEq(wrap.children[0].textContent, 'Training bonus (3)');
+    assertEq(wrap.children[0].textContent, 'Training bonus (2)');
   });
 
   await test('invokeNextAvailableTrainingBonus picks the theme with the highest charge count', async () => {
@@ -541,6 +585,16 @@ function assertEq(actual, expected, msg) {
     assertEq(BonusSystem.canInvokeBonus('fork'), true);
   });
 
+  await test('flow bonus button appears when flow is entered and hides when flow exits unused', async () => {
+    assertEq(document.getElementById('flow-bonus-section').classList.contains('hidden'), true);
+    FocusSystem._enterFlow(1);
+    assertEq(_trainingState.flowBonus.earned, true);
+    assertEq(document.getElementById('flow-bonus-section').classList.contains('hidden'), false);
+    FocusSystem._exitFlow();
+    assertEq(_trainingState.flowBonus.earned, false);
+    assertEq(document.getElementById('flow-bonus-section').classList.contains('hidden'), true);
+  });
+
   console.log('\n── Invocation and puzzle mode ──');
 
   await test('invokeBonus consumes a stored charge and enters puzzle mode', async () => {
@@ -556,6 +610,22 @@ function assertEq(actual, expected, msg) {
     assertEq(UIManager._pieceSource, 'puzzle');
     assertEq(BonusSystem.isInPuzzleMode(), true);
     assertEq(BonusSystem.getPuzzleState().theme, 'fork');
+  });
+
+  await test('entering puzzle mode shows the vertical fuse bar and draining state', async () => {
+    const puzzle = findPuzzle('mateIn1', (entry) => entry.solution.length === 1);
+    _trainingState.trainingBonuses.mateIn1 = 1;
+    _trainingState.reinforcementQueues.mateIn1 = [
+      { puzzleId: puzzle.id, state: 'active', confirmations: 0 },
+    ];
+
+    assertEq(BonusSystem.invokeBonus('mateIn1'), true);
+    const bar = document.getElementById('puzzle-fuse-bar');
+    const fill = document.getElementById('puzzle-fuse-fill');
+    assertEq(bar.classList.contains('hidden'), false);
+    const before = fill.style.height;
+    await advanceTime(1000);
+    assert(fill.style.height !== before, 'expected fuse height to change while draining');
   });
 
   await test('invokeBonus returns false when no puzzle is available', async () => {
@@ -696,7 +766,7 @@ function assertEq(actual, expected, msg) {
     assertEq(BonusSystem.isInPuzzleMode(), true);
 
     await clickMove(puzzle.solution[2]);
-    await advanceTime(500 + 1500 + 1100 + 1100);
+    await advanceTime(6000);
 
     assertEq(BonusSystem.isInPuzzleMode(), false);
     const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
@@ -707,10 +777,155 @@ function assertEq(actual, expected, msg) {
 
   await test('getRewardMoveCount uses base 2 plus aptitude thresholds', async () => {
     assertEq(BonusSystem.getRewardMoveCount('fork'), 2);
-    _trainingState.aptitudes.fork = 55;
+    _trainingState.puzzleRatings.fork = 900;
     assertEq(BonusSystem.getRewardMoveCount('fork'), 3);
-    _trainingState.aptitudes.fork = 81;
+    _trainingState.puzzleRatings.fork = 1100;
     assertEq(BonusSystem.getRewardMoveCount('fork'), 4);
+    StaffSystem.getCurrentCoach = () => ({ primaryThemes: ['fork'], bonusMoves: 3 });
+    StaffSystem.getCurrentCoachBonusMoves = (theme) => (theme === 'fork' ? 3 : 0);
+    assertEq(BonusSystem.getRewardMoveCount('fork'), 7);
+  });
+
+  await test('Blitz Decay fast tier yields 3 base moves before bonuses', async () => {
+    const puzzle = {
+      id: 'mateIn1_blitz_fast',
+      theme: 'mateIn1',
+      difficulty: 950,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:blitz-fast',
+    };
+
+    await withInjectedPuzzle(puzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      _trainingState.trainingBonuses.mateIn1 = 1;
+      _trainingState.reinforcementQueues.mateIn1 = [
+        { puzzleId: puzzle.id, state: 'active', confirmations: 0 },
+      ];
+      _bestMoves = [{ from: 'e2', to: 'e4', move: 'e2e4' }];
+      _aiMoves = [{ from: 'e7', to: 'e5' }];
+
+      BonusSystem.invokeBonus('mateIn1');
+      await advanceTime(1000);
+      await clickMove(puzzle.solution[0]);
+      await advanceTime(5000);
+
+      const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
+      assertEq(resolved.payload.movesGranted, 3);
+    });
+  });
+
+  await test('Blitz Decay medium tier yields 2 base moves before bonuses', async () => {
+    const puzzle = {
+      id: 'mateIn1_blitz_medium',
+      theme: 'mateIn1',
+      difficulty: 950,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:blitz-medium',
+    };
+
+    await withInjectedPuzzle(puzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      _trainingState.trainingBonuses.mateIn1 = 1;
+      _trainingState.reinforcementQueues.mateIn1 = [
+        { puzzleId: puzzle.id, state: 'active', confirmations: 0 },
+      ];
+      _bestMoves = [{ from: 'e2', to: 'e4', move: 'e2e4' }];
+      _aiMoves = [{ from: 'e7', to: 'e5' }];
+
+      BonusSystem.invokeBonus('mateIn1');
+      await advanceTime(12000);
+      await clickMove(puzzle.solution[0]);
+      await advanceTime(5000);
+
+      const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
+      assertEq(resolved.payload.movesGranted, 2);
+    });
+  });
+
+  await test('Blitz Decay slow tier yields 1 base move before bonuses', async () => {
+    const puzzle = {
+      id: 'mateIn1_blitz_slow',
+      theme: 'mateIn1',
+      difficulty: 950,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:blitz-slow',
+    };
+
+    await withInjectedPuzzle(puzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      _trainingState.trainingBonuses.mateIn1 = 1;
+      _trainingState.reinforcementQueues.mateIn1 = [
+        { puzzleId: puzzle.id, state: 'active', confirmations: 0 },
+      ];
+      _bestMoves = [{ from: 'e2', to: 'e4', move: 'e2e4' }];
+      _aiMoves = [{ from: 'e7', to: 'e5' }];
+
+      BonusSystem.invokeBonus('mateIn1');
+      await advanceTime(19000);
+      await clickMove(puzzle.solution[0]);
+      await advanceTime(5000);
+
+      const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
+      assertEq(resolved.payload.movesGranted, 1);
+    });
+  });
+
+  await test('Blitz Decay threshold scales upward with longer solutions', async () => {
+    const shortPuzzle = {
+      id: 'mateIn1_blitz_short',
+      theme: 'mateIn1',
+      difficulty: 900,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:short',
+    };
+    const longPuzzle = {
+      id: 'fork_blitz_long',
+      theme: 'fork',
+      difficulty: 900,
+      fen: '5rk1/pp3rp1/1b6/2qpR1N1/6b1/2P5/P2NQPPP/R5K1 w - - 2 22',
+      solution: ['e2g4', 'c5f2', 'g1f2', 'b6f2', 'e5h5'],
+      source: 'test:long',
+    };
+
+    await withInjectedPuzzle(shortPuzzle, async () => {
+      await withInjectedPuzzle(longPuzzle, async () => {
+        loadModules();
+        PuzzleSystem.clearForTests();
+        PuzzleSystem.init();
+        BonusSystem.init();
+        _trainingState.trainingBonuses.mateIn1 = 1;
+        _trainingState.reinforcementQueues.mateIn1 = [
+          { puzzleId: shortPuzzle.id, state: 'active', confirmations: 0 },
+        ];
+        BonusSystem.invokeBonus('mateIn1');
+        const shortDrain = BonusSystem.getPuzzleState().drainMs;
+        const shortFailure = BonusSystem.resolvePuzzleFailure();
+        await advanceTime(2000);
+        await shortFailure;
+
+        _trainingState.trainingBonuses.fork = 1;
+        _trainingState.reinforcementQueues.fork = [
+          { puzzleId: longPuzzle.id, state: 'active', confirmations: 0 },
+        ];
+        BonusSystem.invokeBonus('fork');
+        const longDrain = BonusSystem.getPuzzleState().drainMs;
+
+        assert(longDrain > shortDrain, 'expected longer puzzle to drain more slowly');
+      });
+    });
   });
 
   await test('bonus_invoked emits the locked payload', async () => {
@@ -749,14 +964,148 @@ function assertEq(actual, expected, msg) {
 
       BonusSystem.invokeBonus('mateIn1');
       await clickMove(puzzle.solution[0]);
-      await advanceTime(1500 + 1100 + 1100);
+      await advanceTime(5000);
 
       const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
       assertEq(resolved.payload.source, 'training');
       assertEq(resolved.payload.theme, 'mateIn1');
       assertEq(resolved.payload.success, true);
-      assertEq(resolved.payload.movesGranted, 2);
+      assertEq(resolved.payload.movesGranted, 3);
       assertEq(resolved.payload.puzzleId, puzzle.id);
+    });
+  });
+
+  await test('flow bonus invocation picks an unseen random-theme puzzle with hidden theme', async () => {
+    const flowPuzzle = {
+      id: 'flow_hidden_theme_test',
+      theme: 'pin',
+      difficulty: 1010,
+      fen: '6k1/5ppp/8/8/8/8/5QPP/6K1 w - - 0 1',
+      solution: ['f2a8'],
+      source: 'test:flow-hidden',
+    };
+
+    await withInjectedPuzzle(flowPuzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      for (const puzzle of PUZZLES) {
+        if (puzzle.id !== flowPuzzle.id) _trainingState.seenPuzzleIds[puzzle.id] = 1;
+      }
+
+      FocusSystem._enterFlow(1);
+      assertEq(BonusSystem.invokeFlowBonus(), true);
+      const state = BonusSystem.getPuzzleState();
+      assertEq(state.source, 'flow');
+      assertEq(state.theme, null);
+      assertEq(state.hiddenTheme, true);
+      assertEq(state.puzzleId, flowPuzzle.id);
+      assertEq(state.fen.split(' ')[1], ChessEngine.getPlayerColor());
+    });
+  });
+
+  await test('Flow I earns a bonus, using it allows Flow II to earn a new one', async () => {
+    const flowPuzzle = {
+      id: 'flow_reearn_test',
+      theme: 'fork',
+      difficulty: 960,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:flow-reearn',
+    };
+
+    await withInjectedPuzzle(flowPuzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      for (const puzzle of PUZZLES) {
+        if (puzzle.id !== flowPuzzle.id) _trainingState.seenPuzzleIds[puzzle.id] = 1;
+      }
+
+      FocusSystem._enterFlow(1);
+      assertEq(PuzzleSystem.hasFlowBonus(), true);
+      assertEq(BonusSystem.invokeFlowBonus(), true);
+      assertEq(PuzzleSystem.hasFlowBonus(), false);
+
+      FocusSystem._enterFlow(2);
+      assertEq(PuzzleSystem.hasFlowBonus(), true);
+    });
+  });
+
+  await test('Flow III does not add a second bonus when one is already held', async () => {
+    FocusSystem._enterFlow(2);
+    assertEq(PuzzleSystem.hasFlowBonus(), true);
+    const before = _saveCount;
+    FocusSystem._enterFlow(3);
+    assertEq(PuzzleSystem.hasFlowBonus(), true);
+    assertEq(_saveCount, before);
+  });
+
+  await test('flow bonus reveal card includes the hidden theme after success', async () => {
+    const flowPuzzle = {
+      id: 'flow_reveal_theme_test',
+      theme: 'fork',
+      difficulty: 990,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:flow-reveal',
+    };
+
+    await withInjectedPuzzle(flowPuzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      for (const puzzle of PUZZLES) {
+        if (puzzle.id !== flowPuzzle.id) _trainingState.seenPuzzleIds[puzzle.id] = 1;
+      }
+      _bestMoves = [{ from: 'e2', to: 'e4', move: 'e2e4' }];
+      _aiMoves = [{ from: 'e7', to: 'e5' }];
+
+      FocusSystem._enterFlow(1);
+      BonusSystem.invokeFlowBonus();
+      await clickMove(flowPuzzle.solution[0]);
+      assertEq(document.getElementById('puzzle-outcome-card').textContent, 'Theme revealed: FORK');
+      await advanceTime(500);
+      assert(document.getElementById('puzzle-outcome-card').textContent.includes('Total: 3 Stockfish moves'));
+    });
+  });
+
+  await test('flow bonus reward uses the revealed theme for coach quality', async () => {
+    const flowPuzzle = {
+      id: 'flow_coach_theme_test',
+      theme: 'pin',
+      difficulty: 990,
+      fen: '6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1',
+      solution: ['f7g7'],
+      source: 'test:flow-coach',
+    };
+
+    await withInjectedPuzzle(flowPuzzle, async () => {
+      loadModules();
+      PuzzleSystem.clearForTests();
+      PuzzleSystem.init();
+      BonusSystem.init();
+      for (const puzzle of PUZZLES) {
+        if (puzzle.id !== flowPuzzle.id) _trainingState.seenPuzzleIds[puzzle.id] = 1;
+      }
+      StaffSystem.getCurrentCoach = () => ({ primaryThemes: ['pin'], bonusMoves: 3 });
+      StaffSystem.getCurrentCoachBonusMoves = (theme) => (theme === 'pin' ? 3 : 0);
+      _trainingState.puzzleRatings.pin = 900;
+      _bestMoves = [{ from: 'e2', to: 'e4', move: 'e2e4' }];
+      _aiMoves = [{ from: 'e7', to: 'e5' }];
+
+      FocusSystem._enterFlow(1);
+      BonusSystem.invokeFlowBonus();
+      await clickMove(flowPuzzle.solution[0]);
+      await advanceTime(7000);
+
+      const resolved = _emittedEvents.find((event) => event.eventName === GameEvents.EVENTS.BONUS_RESOLVED);
+      assertEq(resolved.payload.source, 'flow');
+      assertEq(resolved.payload.theme, 'pin');
+      assertEq(resolved.payload.movesGranted, 7);
     });
   });
 
@@ -811,7 +1160,8 @@ function assertEq(actual, expected, msg) {
   });
 
   console.log('\nResult: ' + passed + ' passed, ' + failed + ' failed\n');
-  if (failed > 0) {
-    process.exitCode = 1;
-  }
+if (failed > 0) {
+  process.exitCode = 1;
+}
+Date.now = REAL_DATE_NOW;
 })();

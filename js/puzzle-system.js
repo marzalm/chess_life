@@ -7,7 +7,8 @@
 // ships in E.2.
 //
 // Pure logic, no DOM. Owns puzzle selection, seen-puzzle tracking,
-// reinforcement queues, aptitude growth, and training bonus charges.
+// reinforcement queues, per-theme puzzle ratings, and tournament-
+// scoped training-bonus preparation.
 
 const PuzzleSystem = (() => {
 
@@ -61,21 +62,23 @@ const PuzzleSystem = (() => {
     queensPawnGame: "Queen's Pawn Game",
   };
 
-  const DEFAULT_SESSION_SIZE = 5;
-  const DEFAULT_PASS_THRESHOLD = 3;
+  const TRAINING_K_FACTOR_MULT = 0.25;
+  const SESSION_STREAK_TARGET = 3;
+  const SESSION_SOLVE_TARGET = 6;
+  const SESSION_MAX_ATTEMPTS = 18;
 
   /** @type {Map<string, object>} */
   const _sessions = new Map();
   let _sessionSeq = 1;
 
+  function _clone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  }
+
   function _ensureTheme(theme) {
     if (!THEMES.includes(theme)) {
       throw new Error(`[PuzzleSystem] Unknown theme: ${theme}`);
     }
-  }
-
-  function _clone(obj) {
-    return JSON.parse(JSON.stringify(obj));
   }
 
   function _getTrainingState() {
@@ -85,17 +88,44 @@ const PuzzleSystem = (() => {
     return CareerManager.training.get();
   }
 
+  function _emptyThemeBonus() {
+    return {
+      prepared: false,
+      usedThisGame: false,
+      lockedUntilTournamentEnd: false,
+    };
+  }
+
+  function _normalizeThemeBonusEntry(entry) {
+    if (typeof entry === 'number') {
+      return {
+        prepared: entry > 0,
+        usedThisGame: false,
+        lockedUntilTournamentEnd: entry > 0,
+      };
+    }
+    if (!entry || typeof entry !== 'object') return _emptyThemeBonus();
+    return {
+      prepared: Boolean(entry.prepared),
+      usedThisGame: Boolean(entry.usedThisGame),
+      lockedUntilTournamentEnd: Boolean(entry.lockedUntilTournamentEnd),
+    };
+  }
+
   function _normalizeTrainingState() {
     const training = _getTrainingState();
-    if (!training.aptitudes) training.aptitudes = {};
     if (!training.seenPuzzleIds) training.seenPuzzleIds = {};
     if (!training.reinforcementQueues) training.reinforcementQueues = {};
     if (!training.trainingBonuses) training.trainingBonuses = {};
     if (!training.flowBonus) {
       training.flowBonus = { earned: false, reservedPuzzleId: null };
     }
-    if (typeof training.puzzleRating !== 'number') training.puzzleRating = 500;
-    if (typeof training.puzzleRatingRd !== 'number') training.puzzleRatingRd = 300;
+    if (!training.puzzleRatings) training.puzzleRatings = {};
+    if (!training.puzzleRatingRds) training.puzzleRatingRds = {};
+
+    const legacyRating = typeof training.puzzleRating === 'number' ? training.puzzleRating : 500;
+    const legacyRd = typeof training.puzzleRatingRd === 'number' ? training.puzzleRatingRd : 300;
+
     if (!training.stats) {
       training.stats = {
         sessionsCompleted: 0,
@@ -111,11 +141,16 @@ const PuzzleSystem = (() => {
     if (!training.stats.byTheme) training.stats.byTheme = {};
 
     THEMES.forEach((theme) => {
-      if (training.aptitudes[theme] == null) training.aptitudes[theme] = 0;
       if (!Array.isArray(training.reinforcementQueues[theme])) {
         training.reinforcementQueues[theme] = [];
       }
-      if (training.trainingBonuses[theme] == null) training.trainingBonuses[theme] = 0;
+      training.trainingBonuses[theme] = _normalizeThemeBonusEntry(training.trainingBonuses[theme]);
+      if (typeof training.puzzleRatings[theme] !== 'number') {
+        training.puzzleRatings[theme] = legacyRating;
+      }
+      if (typeof training.puzzleRatingRds[theme] !== 'number') {
+        training.puzzleRatingRds[theme] = legacyRd;
+      }
       if (!training.stats.byTheme[theme]) {
         training.stats.byTheme[theme] = {
           solvedThemePuzzles: 0,
@@ -130,6 +165,10 @@ const PuzzleSystem = (() => {
         }
       }
     });
+
+    delete training.aptitudes;
+    delete training.puzzleRating;
+    delete training.puzzleRatingRd;
   }
 
   function _getThemeStats(training, theme) {
@@ -142,28 +181,11 @@ const PuzzleSystem = (() => {
     return training.stats.byTheme[theme];
   }
 
-  function _getPlayerElo() {
-    if (typeof CareerManager !== 'undefined' &&
-        CareerManager.player &&
-        typeof CareerManager.player.get === 'function') {
-      return CareerManager.player.get().elo;
-    }
-    return 800;
-  }
-
   function _puzzleTurnColor(puzzle) {
     // puzzle-data.js stores post-setup FENs normalized at extraction
-    // time, so the side-to-move here is the player's color, not the
-    // opponent's setup color from the raw Lichess CSV row.
+    // time, so the side-to-move here is the player's color.
     const parts = String(puzzle.fen || '').split(' ');
     return parts[1] === 'b' ? 'b' : 'w';
-  }
-
-  function _getPuzzleRatingWindow(training) {
-    const targetRating = training.puzzleRating;
-    const rd = training.puzzleRatingRd;
-    const window = Math.max(150, Math.round(rd * 1.2));
-    return { targetRating, rd, window };
   }
 
   function _hash(s) {
@@ -175,8 +197,8 @@ const PuzzleSystem = (() => {
     return h >>> 0;
   }
 
-  function _sortKey(theme, puzzleId) {
-    return _hash(`${theme}:${puzzleId}`);
+  function _sortKey(prefix, id) {
+    return _hash(`${prefix}:${id}`);
   }
 
   function _getThemePool(theme) {
@@ -198,12 +220,11 @@ const PuzzleSystem = (() => {
     training.seenPuzzleIds[puzzleId] = 1;
   }
 
-  function _recalculateAptitude(training, theme) {
-    const stats = _getThemeStats(training, theme);
-    training.aptitudes[theme] = Math.min(
-      100,
-      Math.floor(stats.solvedThemePuzzles * 1.5 + stats.reinforcedResolves * 2),
-    );
+  function _getPuzzleRatingWindow(training, theme) {
+    const targetRating = training.puzzleRatings[theme];
+    const rd = training.puzzleRatingRds[theme];
+    const window = Math.max(150, Math.round(rd * 1.2));
+    return { targetRating, rd, window };
   }
 
   function _queuePuzzleFailure(training, theme, puzzleId) {
@@ -242,10 +263,15 @@ const PuzzleSystem = (() => {
     return true;
   }
 
+  function _getDerivedAptitudeFromRating(rating) {
+    return Math.max(0, Math.min(100, Math.round((rating - 500) / 7)));
+  }
+
   function _pickNewThemePuzzles(theme, needed, training, options = {}) {
     const queuedIds = new Set(training.reinforcementQueues[theme].map((entry) => entry.puzzleId));
+    const excludedIds = new Set(options.excludeIds || []);
     const basePool = _getThemePool(theme)
-      .filter((p) => !queuedIds.has(p.id))
+      .filter((p) => !queuedIds.has(p.id) && !excludedIds.has(p.id))
       .slice()
       .sort((a, b) => _sortKey(theme, a.id) - _sortKey(theme, b.id));
     const preferredColor = options.preferredColor || null;
@@ -253,7 +279,7 @@ const PuzzleSystem = (() => {
       ? basePool.filter((puzzle) => _puzzleTurnColor(puzzle) === preferredColor)
       : basePool;
     const pool = colorMatchedPool.length > 0 ? colorMatchedPool : basePool;
-    const { targetRating, window } = _getPuzzleRatingWindow(training);
+    const { targetRating, window } = _getPuzzleRatingWindow(training, theme);
 
     const ranked = pool.map((puzzle) => {
       const seen = Boolean(training.seenPuzzleIds[puzzle.id]);
@@ -270,49 +296,128 @@ const PuzzleSystem = (() => {
       if (a.bucket !== b.bucket) return a.bucket - b.bucket;
       const aDistance = Math.abs(a.puzzle.difficulty - targetRating);
       const bDistance = Math.abs(b.puzzle.difficulty - targetRating);
-      if (aDistance !== bDistance) {
-        return aDistance - bDistance;
-      }
+      if (aDistance !== bDistance) return aDistance - bDistance;
       return _sortKey(theme, a.puzzle.id) - _sortKey(theme, b.puzzle.id);
     });
 
     return ranked.slice(0, needed).map((entry) => entry.puzzle);
   }
 
-  function _pickReinforcementPuzzle(theme, training) {
+  function _pickReinforcementPuzzle(theme, training, excludeIds = []) {
+    const exclude = new Set(excludeIds);
     const queue = training.reinforcementQueues[theme] || [];
     for (const entry of queue) {
+      if (exclude.has(entry.puzzleId)) continue;
       const puzzle = _findPuzzleById(entry.puzzleId);
       if (puzzle) return puzzle;
     }
     return null;
   }
 
-  function _buildSession(theme, puzzles, options) {
-    const id = `puzzle_session_${_sessionSeq++}`;
-    const session = {
-      id,
-      theme,
-      size: puzzles.length,
-      passThreshold: options.passThreshold ?? DEFAULT_PASS_THRESHOLD,
-      currentIndex: 0,
-      status: 'active',
-      puzzles: puzzles.map((puzzle) => ({
-        id: puzzle.id,
-        theme: puzzle.theme,
-        difficulty: puzzle.difficulty,
-        source: puzzle.source,
-        fen: puzzle.fen,
-        solution: [...puzzle.solution],
-        reinforcement: Boolean(options.reinforcementIds && options.reinforcementIds.has(puzzle.id)),
-      })),
-      answers: [],
+  function _pickSessionPuzzle(theme, training, session) {
+    const usedIds = session ? session.usedPuzzleIds : [];
+    let puzzle = _pickReinforcementPuzzle(theme, training, usedIds);
+    if (puzzle) return puzzle;
+
+    const fresh = _pickNewThemePuzzles(theme, 1, training, { excludeIds: usedIds });
+    if (fresh.length > 0) return fresh[0];
+
+    const fullPool = _getThemePool(theme)
+      .slice()
+      .sort((a, b) => _sortKey(`${theme}:fallback`, a.id) - _sortKey(`${theme}:fallback`, b.id));
+    return fullPool[0] || null;
+  }
+
+  function _preparePuzzleForSession(training, puzzle) {
+    if (!puzzle) return null;
+    _markSeen(training, puzzle.id);
+    CareerManager.save();
+    return {
+      id: puzzle.id,
+      theme: puzzle.theme,
+      difficulty: puzzle.difficulty,
+      source: puzzle.source,
+      fen: puzzle.fen,
+      solution: [...puzzle.solution],
+      reinforcement: false,
     };
-    _sessions.set(id, session);
-    return session;
+  }
+
+  function _sessionSnapshot(session) {
+    return {
+      id: session.id,
+      theme: session.theme,
+      status: session.status,
+      attemptsUsed: session.attemptsUsed,
+      attemptsRemaining: Math.max(0, SESSION_MAX_ATTEMPTS - session.attemptsUsed),
+      solvedTotal: session.solvedTotal,
+      streak: session.streak,
+      currentPuzzle: session.currentPuzzle ? _clone(session.currentPuzzle) : null,
+      resultPath: session.resultPath || null,
+      bonusGranted: Boolean(session.bonusGranted),
+      summary: session.summary ? _clone(session.summary) : null,
+    };
+  }
+
+  function _finalizeSessionSuccess(session, training, path) {
+    const themeBonus = training.trainingBonuses[session.theme];
+    themeBonus.prepared = true;
+    themeBonus.usedThisGame = false;
+    themeBonus.lockedUntilTournamentEnd = true;
+
+    training.stats.sessionsCompleted += 1;
+    training.stats.sessionsPassed += 1;
+
+    session.status = 'completed';
+    session.bonusGranted = true;
+    session.resultPath = path;
+    session.currentPuzzle = null;
+    session.summary = {
+      sessionId: session.id,
+      theme: session.theme,
+      correct: session.solvedTotal,
+      total: session.attemptsUsed,
+      passed: true,
+      bonusGranted: true,
+      path,
+      rating: training.puzzleRatings[session.theme],
+      ratingRd: training.puzzleRatingRds[session.theme],
+      aptitude: _getDerivedAptitudeFromRating(training.puzzleRatings[session.theme]),
+      trainingBonus: _clone(themeBonus),
+      reinforcementQueueSize: training.reinforcementQueues[session.theme].length,
+    };
+    CareerManager.save();
+  }
+
+  function _finalizeSessionFailure(session, training) {
+    training.stats.sessionsCompleted += 1;
+    session.status = 'completed';
+    session.bonusGranted = false;
+    session.resultPath = 'failure';
+    session.currentPuzzle = null;
+    session.summary = {
+      sessionId: session.id,
+      theme: session.theme,
+      correct: session.solvedTotal,
+      total: session.attemptsUsed,
+      passed: false,
+      bonusGranted: false,
+      path: 'failure',
+      rating: training.puzzleRatings[session.theme],
+      ratingRd: training.puzzleRatingRds[session.theme],
+      aptitude: _getDerivedAptitudeFromRating(training.puzzleRatings[session.theme]),
+      trainingBonus: _clone(training.trainingBonuses[session.theme]),
+      reinforcementQueueSize: training.reinforcementQueues[session.theme].length,
+    };
+    CareerManager.save();
   }
 
   return {
+    TRAINING_K_FACTOR_MULT,
+    SESSION_STREAK_TARGET,
+    SESSION_SOLVE_TARGET,
+    SESSION_MAX_ATTEMPTS,
+
     init() {
       _normalizeTrainingState();
       CareerManager.save();
@@ -327,32 +432,144 @@ const PuzzleSystem = (() => {
       return THEME_LABELS[theme];
     },
 
+    getPuzzleRating(theme) {
+      _ensureTheme(theme);
+      _normalizeTrainingState();
+      return _getTrainingState().puzzleRatings[theme];
+    },
+
+    getPuzzleRatingRd(theme) {
+      _ensureTheme(theme);
+      _normalizeTrainingState();
+      return _getTrainingState().puzzleRatingRds[theme];
+    },
+
     getAptitude(theme) {
       _ensureTheme(theme);
       _normalizeTrainingState();
-      return _getTrainingState().aptitudes[theme];
+      return _getDerivedAptitudeFromRating(_getTrainingState().puzzleRatings[theme]);
+    },
+
+    getTrainingBonusStatus(theme) {
+      _ensureTheme(theme);
+      _normalizeTrainingState();
+      return _clone(_getTrainingState().trainingBonuses[theme]);
+    },
+
+    getPreparedThemes() {
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      return THEMES.filter((theme) => training.trainingBonuses[theme].prepared);
     },
 
     getTrainingBonusCount(theme) {
       _ensureTheme(theme);
       _normalizeTrainingState();
-      return _getTrainingState().trainingBonuses[theme];
+      const bonus = _getTrainingState().trainingBonuses[theme];
+      return bonus.prepared && !bonus.usedThisGame ? 1 : 0;
     },
 
-    getPuzzleRating() {
+    consumeTrainingBonus(theme) {
+      _ensureTheme(theme);
       _normalizeTrainingState();
-      return _getTrainingState().puzzleRating;
+      const training = _getTrainingState();
+      const bonus = training.trainingBonuses[theme];
+      if (!bonus.prepared || bonus.usedThisGame) return false;
+      bonus.usedThisGame = true;
+      training.stats.bonusesUsedTraining += 1;
+      CareerManager.save();
+      return true;
     },
 
-    getPuzzleRatingRd() {
+    resetTrainingBonusesForGame() {
       _normalizeTrainingState();
-      return _getTrainingState().puzzleRatingRd;
+      const training = _getTrainingState();
+      THEMES.forEach((theme) => {
+        if (training.trainingBonuses[theme].prepared) {
+          training.trainingBonuses[theme].usedThisGame = false;
+        }
+      });
+      CareerManager.save();
+    },
+
+    clearTrainingBonusesAfterTournament() {
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      THEMES.forEach((theme) => {
+        training.trainingBonuses[theme] = _emptyThemeBonus();
+      });
+      CareerManager.save();
+    },
+
+    hasFlowBonus() {
+      _normalizeTrainingState();
+      return Boolean(_getTrainingState().flowBonus.earned);
+    },
+
+    getFlowBonusState() {
+      _normalizeTrainingState();
+      return _clone(_getTrainingState().flowBonus);
+    },
+
+    earnFlowBonus() {
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      if (training.flowBonus.earned) return false;
+      training.flowBonus.earned = true;
+      training.flowBonus.reservedPuzzleId = null;
+      CareerManager.save();
+      return true;
+    },
+
+    consumeFlowBonus() {
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      if (!training.flowBonus.earned) return false;
+      training.flowBonus.earned = false;
+      training.stats.bonusesUsedFlow += 1;
+      CareerManager.save();
+      return true;
+    },
+
+    clearFlowBonus() {
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      const changed = training.flowBonus.earned || Boolean(training.flowBonus.reservedPuzzleId);
+      if (!changed) return false;
+      training.flowBonus.earned = false;
+      training.flowBonus.reservedPuzzleId = null;
+      CareerManager.save();
+      return true;
     },
 
     getReinforcementQueue(theme) {
       _ensureTheme(theme);
       _normalizeTrainingState();
       return _clone(_getTrainingState().reinforcementQueues[theme]);
+    },
+
+    updatePuzzleRatingAfterAttempt(theme, puzzleDifficulty, success, kFactorMult = 1) {
+      _ensureTheme(theme);
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      const playerRating = training.puzzleRatings[theme];
+      const rd = training.puzzleRatingRds[theme];
+      const expected = 1 / (1 + Math.pow(10, (puzzleDifficulty - playerRating) / 400));
+      const actual = success ? 1 : 0;
+      const k = Math.max(10, Math.round((rd / 5) * (kFactorMult || 1)));
+      let rawDelta = k * (actual - expected);
+      if (!success) rawDelta *= 0.5;
+      const delta = Math.round(rawDelta);
+
+      training.puzzleRatings[theme] = Math.max(400, Math.min(2500, playerRating + delta));
+      training.puzzleRatingRds[theme] = Math.max(50, rd - 5);
+
+      CareerManager.save();
+      return {
+        delta,
+        newRating: training.puzzleRatings[theme],
+        newRd: training.puzzleRatingRds[theme],
+      };
     },
 
     pickInGamePuzzle(theme, preferredColor = null) {
@@ -374,164 +591,166 @@ const PuzzleSystem = (() => {
       return _clone(puzzle);
     },
 
-    consumeTrainingBonus(theme) {
-      _ensureTheme(theme);
+    pickFlowPuzzle(preferredColor = null) {
       _normalizeTrainingState();
 
       const training = _getTrainingState();
-      if ((training.trainingBonuses[theme] || 0) < 1) {
-        return false;
+      if (training.flowBonus.reservedPuzzleId) {
+        const reserved = _findPuzzleById(training.flowBonus.reservedPuzzleId);
+        if (reserved) return _clone(reserved);
       }
 
-      training.trainingBonuses[theme] -= 1;
+      const ranked = PUZZLES
+        .filter((puzzle) => !training.seenPuzzleIds[puzzle.id])
+        .map((puzzle) => {
+          const rating = training.puzzleRatings[puzzle.theme] ?? 500;
+          const rd = training.puzzleRatingRds[puzzle.theme] ?? 300;
+          const window = Math.max(150, Math.round(rd * 1.2));
+          const inWindow = Math.abs(puzzle.difficulty - rating) <= window;
+          return { puzzle, rating, inWindow };
+        })
+        .sort((a, b) => {
+          if (a.inWindow !== b.inWindow) return a.inWindow ? -1 : 1;
+          const aDistance = Math.abs(a.puzzle.difficulty - a.rating);
+          const bDistance = Math.abs(b.puzzle.difficulty - b.rating);
+          if (aDistance !== bDistance) return aDistance - bDistance;
+          return _sortKey('flow', a.puzzle.id) - _sortKey('flow', b.puzzle.id);
+        });
+
+      const preferredPool = preferredColor
+        ? ranked.filter((entry) => _puzzleTurnColor(entry.puzzle) === preferredColor)
+        : ranked;
+      const pool = preferredPool.length > 0 ? preferredPool : ranked;
+      const puzzle = pool.length > 0 ? pool[0].puzzle : null;
+      if (!puzzle) return null;
+
+      _markSeen(training, puzzle.id);
+      training.flowBonus.reservedPuzzleId = puzzle.id;
       CareerManager.save();
-      return true;
+      return _clone(puzzle);
     },
 
-    updatePuzzleRatingAfterAttempt(puzzleDifficulty, success) {
+    canStartTrainingSession(theme) {
+      _ensureTheme(theme);
       _normalizeTrainingState();
       const training = _getTrainingState();
-      const playerRating = training.puzzleRating;
-      const rd = training.puzzleRatingRd;
-      const expected = 1 / (1 + Math.pow(10, (puzzleDifficulty - playerRating) / 400));
-      const actual = success ? 1 : 0;
-      const k = Math.max(10, Math.round(rd / 5));
-      let rawDelta = k * (actual - expected);
-      if (!success) rawDelta *= 0.5;
-      const delta = Math.round(rawDelta);
-
-      training.puzzleRating = Math.max(400, Math.min(2500, playerRating + delta));
-      training.puzzleRatingRd = Math.max(50, rd - 5);
-
-      CareerManager.save();
-      return {
-        delta,
-        newRating: training.puzzleRating,
-        newRd: training.puzzleRatingRd,
-      };
+      const bonus = training.trainingBonuses[theme];
+      const reasons = [];
+      const active = [..._sessions.values()].find((session) => session.status === 'active');
+      if (active) reasons.push('session_active');
+      if (bonus.lockedUntilTournamentEnd) reasons.push('already_prepared');
+      return { ok: reasons.length === 0, reasons };
     },
 
-    startSelfTrainingSession(theme, options = {}) {
+    startSelfTrainingSession(theme) {
       _ensureTheme(theme);
       _normalizeTrainingState();
 
+      const verdict = this.canStartTrainingSession(theme);
+      if (!verdict.ok) {
+        throw new Error(`[PuzzleSystem] Cannot start session for ${theme}: ${verdict.reasons.join(', ')}`);
+      }
+
       const training = _getTrainingState();
-      const size = options.size || DEFAULT_SESSION_SIZE;
-      const queue = training.reinforcementQueues[theme];
-      const reinforcementIds = new Set(queue.map((entry) => entry.puzzleId));
-
-      const reinforcementPuzzles = queue
-        .map((entry) => _findPuzzleById(entry.puzzleId))
-        .filter(Boolean)
-        .slice(0, size);
-
-      const freshPuzzles = _pickNewThemePuzzles(theme, size - reinforcementPuzzles.length, training);
-      const puzzles = [...reinforcementPuzzles, ...freshPuzzles].slice(0, size);
-      if (puzzles.length < size) {
+      const puzzle = _pickSessionPuzzle(theme, training, { usedPuzzleIds: [] });
+      if (!puzzle) {
         throw new Error(`[PuzzleSystem] Not enough puzzles for theme: ${theme}`);
       }
 
-      puzzles.forEach((puzzle) => _markSeen(training, puzzle.id));
-      CareerManager.save();
+      const session = {
+        id: `puzzle_session_${_sessionSeq++}`,
+        theme,
+        status: 'active',
+        attemptsUsed: 0,
+        solvedTotal: 0,
+        streak: 0,
+        bonusGranted: false,
+        resultPath: null,
+        summary: null,
+        usedPuzzleIds: [],
+        currentPuzzle: _preparePuzzleForSession(training, puzzle),
+      };
 
-      return _clone(_buildSession(theme, puzzles, {
-        passThreshold: options.passThreshold,
-        reinforcementIds,
-      }));
+      if (_findQueueEntry(training, theme, puzzle.id)) {
+        session.currentPuzzle.reinforcement = true;
+      }
+
+      session.usedPuzzleIds.push(puzzle.id);
+      _sessions.set(session.id, session);
+      return _sessionSnapshot(session);
     },
 
-    /**
-     * Record the next pass/fail answer in an active session.
-     * In E.1 the caller is trusted: tests, debug hooks, or later UI
-     * layers decide whether the puzzle was solved and pass the boolean
-     * here. E.2 will add move-level validation via a separate method
-     * that consumes this one internally.
-     *
-     * @param {string} sessionId
-     * @param {boolean} solved
-     * @returns {{ puzzleId: string, solved: boolean, remaining: number, index: number }}
-     */
     submitSessionAnswer(sessionId, solved) {
       const session = _sessions.get(sessionId);
       if (!session) throw new Error(`[PuzzleSystem] Unknown session: ${sessionId}`);
       if (session.status !== 'active') {
         throw new Error(`[PuzzleSystem] Session is not active: ${sessionId}`);
       }
-      if (session.currentIndex >= session.puzzles.length) {
-        throw new Error(`[PuzzleSystem] Session already answered: ${sessionId}`);
+      if (!session.currentPuzzle) {
+        throw new Error(`[PuzzleSystem] Session has no active puzzle: ${sessionId}`);
       }
 
-      const puzzle = session.puzzles[session.currentIndex];
-      session.answers.push({
-        puzzleId: puzzle.id,
-        solved: Boolean(solved),
-        reinforcement: puzzle.reinforcement,
-      });
-      session.currentIndex += 1;
+      _normalizeTrainingState();
+      const training = _getTrainingState();
+      const puzzle = session.currentPuzzle;
+      const answerSolved = Boolean(solved);
+
+      session.attemptsUsed += 1;
+      training.stats.puzzlesAttempted += 1;
+
+      const rating = this.updatePuzzleRatingAfterAttempt(
+        session.theme,
+        puzzle.difficulty,
+        answerSolved,
+        TRAINING_K_FACTOR_MULT,
+      );
+
+      if (answerSolved) {
+        session.solvedTotal += 1;
+        session.streak += 1;
+        training.stats.puzzlesSolvedAllTime += 1;
+        _getThemeStats(training, session.theme).solvedThemePuzzles += 1;
+        if (puzzle.reinforcement) _handleQueuedSolve(training, session.theme, puzzle.id);
+      } else {
+        session.streak = 0;
+        _queuePuzzleFailure(training, session.theme, puzzle.id);
+      }
+
+      if (session.streak >= SESSION_STREAK_TARGET) {
+        _finalizeSessionSuccess(session, training, 'streak');
+      } else if (session.solvedTotal >= SESSION_SOLVE_TARGET) {
+        _finalizeSessionSuccess(session, training, 'persistence');
+      } else if (session.attemptsUsed >= SESSION_MAX_ATTEMPTS) {
+        _finalizeSessionFailure(session, training);
+      } else {
+        const nextPuzzle = _pickSessionPuzzle(session.theme, training, session);
+        if (!nextPuzzle) {
+          _finalizeSessionFailure(session, training);
+        } else {
+          session.currentPuzzle = _preparePuzzleForSession(training, nextPuzzle);
+          if (_findQueueEntry(training, session.theme, nextPuzzle.id)) {
+            session.currentPuzzle.reinforcement = true;
+          }
+          session.usedPuzzleIds.push(nextPuzzle.id);
+          CareerManager.save();
+        }
+      }
 
       return {
         puzzleId: puzzle.id,
-        solved: Boolean(solved),
-        remaining: session.puzzles.length - session.currentIndex,
-        index: session.currentIndex,
+        solved: answerSolved,
+        ratingDelta: rating.delta,
+        session: _sessionSnapshot(session),
       };
     },
 
     completeSession(sessionId) {
       const session = _sessions.get(sessionId);
       if (!session) throw new Error(`[PuzzleSystem] Unknown session: ${sessionId}`);
-      if (session.status !== 'active') {
-        throw new Error(`[PuzzleSystem] Session already completed: ${sessionId}`);
-      }
-      if (session.answers.length !== session.puzzles.length) {
+      if (session.status !== 'completed') {
         throw new Error('[PuzzleSystem] Session is incomplete');
       }
-
-      _normalizeTrainingState();
-      const training = _getTrainingState();
-      let correct = 0;
-
-      for (const answer of session.answers) {
-        const puzzle = session.puzzles.find((entry) => entry.id === answer.puzzleId);
-        if (answer.solved) {
-          correct += 1;
-          training.stats.puzzlesSolvedAllTime += 1;
-          _getThemeStats(training, session.theme).solvedThemePuzzles += 1;
-          if (answer.reinforcement) {
-            _handleQueuedSolve(training, session.theme, answer.puzzleId);
-          }
-        } else {
-          _queuePuzzleFailure(training, session.theme, answer.puzzleId);
-        }
-        if (puzzle) {
-          this.updatePuzzleRatingAfterAttempt(puzzle.difficulty, answer.solved);
-        }
-      }
-
-      _recalculateAptitude(training, session.theme);
-
-      const passed = correct >= session.passThreshold;
-      training.stats.sessionsCompleted += 1;
-      training.stats.puzzlesAttempted += session.answers.length;
-      if (passed) {
-        training.stats.sessionsPassed += 1;
-        training.trainingBonuses[session.theme] += 1;
-      }
-
-      CareerManager.save();
-      session.status = 'completed';
-
-      return {
-        sessionId: session.id,
-        theme: session.theme,
-        correct,
-        total: session.answers.length,
-        passed,
-        bonusGranted: passed,
-        aptitude: training.aptitudes[session.theme],
-        trainingBonusCount: training.trainingBonuses[session.theme],
-        reinforcementQueueSize: training.reinforcementQueues[session.theme].length,
-      };
+      return _clone(session.summary);
     },
 
     getSeenCount() {

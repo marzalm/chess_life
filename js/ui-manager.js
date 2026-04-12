@@ -488,6 +488,9 @@ const UIManager = {
     this._playbackInputLocked = false;
 
     FocusSystem.resetForGame();
+    if (typeof PuzzleSystem !== 'undefined' && PuzzleSystem.resetTrainingBonusesForGame) {
+      PuzzleSystem.resetTrainingBonusesForGame();
+    }
 
     // Fallback placeholder opponent (Phase A — Phase C will always set one)
     if (!this._opponentName) {
@@ -948,6 +951,9 @@ const UIManager = {
     if (!evalInfo || !evalInfo.ply) return;
     this._moveEvals[evalInfo.ply] = evalInfo;
     this.updateMoveHistory();
+    if (typeof BonusSystem !== 'undefined' && BonusSystem.renderInventory) {
+      BonusSystem.renderInventory();
+    }
 
     const square = this._moveEvalSquares[evalInfo.ply];
     if (square && evalInfo.key !== 'neutral') {
@@ -1261,6 +1267,7 @@ window.addEventListener('DOMContentLoaded', () => {
   CareerManager.init();
   CalendarSystem.init();
   CareerFlow.init();
+  StaffSystem.init();
   InboxSystem.init();
   PuzzleSystem.init();
   UIManager.init();

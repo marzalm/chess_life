@@ -22,7 +22,7 @@ const UICareer = (() => {
 
   // ── Screen router ─────────────────────────────────────────
 
-  const SCREENS = ['character', 'home', 'lobby', 'inbox', 'tournament', 'game'];
+  const SCREENS = ['character', 'home', 'lobby', 'inbox', 'coaches', 'training', 'tournament', 'game'];
 
   function _showScreen(name) {
     if (!SCREENS.includes(name)) {
@@ -43,6 +43,8 @@ const UICareer = (() => {
       this._renderHeader();
       this._renderCalendar();
       this._renderUpcoming();
+      this.renderCoachButton();
+      this.renderTrainingButton();
       this.renderInboxBadge();
     },
 
@@ -84,6 +86,50 @@ const UICareer = (() => {
         badgeEl.textContent = '0';
         badgeEl.classList.add('hidden');
       }
+    },
+
+    renderCoachButton() {
+      const labelEl = document.getElementById('career-coach-button-label');
+      const noteEl = document.getElementById('career-current-coach-name');
+      if (!labelEl || !noteEl) return;
+
+      const coach = (typeof StaffSystem !== 'undefined' && StaffSystem.getCurrentCoach)
+        ? StaffSystem.getCurrentCoach()
+        : null;
+
+      if (!coach) {
+        labelEl.textContent = '👨‍🏫 Hire a coach';
+        noteEl.textContent = '';
+        noteEl.classList.add('hidden');
+        return;
+      }
+
+      labelEl.textContent = '👨‍🏫 Your coach';
+      noteEl.textContent = `${coach.title} ${coach.name} · $${coach.weeklyCost}/week`;
+      noteEl.classList.remove('hidden');
+    },
+
+    renderTrainingButton() {
+      const labelEl = document.getElementById('career-training-button-label');
+      const noteEl = document.getElementById('career-training-button-note');
+      if (!labelEl || !noteEl || typeof PuzzleSystem === 'undefined') return;
+
+      const prepared = PuzzleSystem.getPreparedThemes();
+      labelEl.textContent = '🏋️ Train';
+
+      if (prepared.length === 0) {
+        noteEl.textContent = 'No prepared themes';
+        noteEl.classList.add('hidden');
+        return;
+      }
+
+      const labels = prepared
+        .slice(0, 3)
+        .map((theme) => PuzzleSystem.getThemeLabel(theme))
+        .join(', ');
+      const suffix = prepared.length > 3 ? ` +${prepared.length - 3}` : '';
+      noteEl.textContent = `Prepared: ${labels}${suffix}`;
+      noteEl.classList.remove('hidden');
     },
 
     /**
@@ -423,6 +469,537 @@ const UICareer = (() => {
     },
   };
 
+  // ── Coaches screen ────────────────────────────────────────
+
+  let _selectedCoachId = null;
+  let _pendingReplaceCoachId = null;
+  let _activeTrainingSession = null;
+  let _trainingRuntime = null;
+  let _trainingSummaryReady = false;
+
+  function _coachFlag(code) {
+    return COUNTRY_FLAGS[code] || '🏳️';
+  }
+
+  function _coachDisplayName(coach) {
+    return `${coach.title} ${coach.name}`;
+  }
+
+  function _themeLabelList(themes) {
+    return (themes || []).map((theme) => PuzzleSystem.getThemeLabel(theme)).join(', ');
+  }
+
+  const coaches = {
+    render() {
+      const summaryEl = document.getElementById('coaches-summary');
+      const player = CareerManager.player.get();
+      const money = CareerManager.finances.get().money;
+      if (summaryEl) {
+        summaryEl.textContent = `You: Elo ${player.elo} · $${money} · One coach slot`;
+      }
+
+      const all = StaffSystem.getAllCoaches();
+      if (!_selectedCoachId || !all.find((coach) => coach.id === _selectedCoachId)) {
+        const current = StaffSystem.getCurrentCoach();
+        _selectedCoachId = current ? current.id : (all[0] ? all[0].id : null);
+      }
+
+      this.renderCurrentCoach();
+      this.renderBrowser();
+      home.renderCoachButton();
+    },
+
+    renderCurrentCoach() {
+      const panel = document.getElementById('coaches-current-panel');
+      if (!panel) return;
+      const coach = StaffSystem.getCurrentCoach();
+      const hireDate = StaffSystem.getHireDate();
+
+      if (!coach) {
+        panel.innerHTML = `
+          <div class="coaches-current-empty">
+            <div>
+              <div class="coaches-current-title">Current coach</div>
+              <div class="coaches-current-name">No coach hired</div>
+              <div class="coaches-current-note">Browse the catalog below. Hiring starts the first weekly payment immediately.</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      panel.innerHTML = `
+        <div class="coaches-current-hired">
+          <div>
+            <div class="coaches-current-title">Current coach</div>
+            <div class="coaches-current-name">${_coachFlag(coach.nationality)} ${_coachDisplayName(coach)}</div>
+            <div class="coaches-current-meta">$${coach.weeklyCost}/week · Since ${CalendarSystem.formatDate(hireDate)}</div>
+            <div class="coaches-current-meta">Themes: ${_themeLabelList(coach.primaryThemes)}</div>
+            <div class="coaches-current-meta">Bonus: +${coach.bonusMoves} Stockfish moves</div>
+            <div class="coaches-current-note">${coach.background}</div>
+          </div>
+          <button id="btn-fire-current-coach" class="coaches-current-fire" type="button">Fire</button>
+        </div>
+      `;
+
+      const btnFire = document.getElementById('btn-fire-current-coach');
+      if (btnFire) btnFire.addEventListener('click', () => this.onFireCoach());
+    },
+
+    renderBrowser() {
+      const grid = document.getElementById('coaches-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      const current = StaffSystem.getCurrentCoach();
+
+      StaffSystem.getAllCoaches().forEach((coach) => {
+        const verdict = StaffSystem.canHire(coach.id);
+        const isCurrent = current && current.id === coach.id;
+        const locked = verdict.reasons.includes('elo_too_low');
+        const cantAfford = verdict.reasons.includes('cant_afford');
+
+        const card = document.createElement('div');
+        card.className = 'coach-card';
+        if (_selectedCoachId === coach.id) card.classList.add('selected');
+        if (locked) card.classList.add('locked');
+        card.addEventListener('click', () => this.onSelectCoach(coach.id));
+
+        let actionLabel = 'Hire';
+        let actionDisabled = false;
+        if (isCurrent) {
+          actionLabel = 'Current coach';
+          actionDisabled = true;
+        } else if (locked) {
+          actionLabel = `Requires ${coach.eloUnlock} Elo`;
+          actionDisabled = true;
+        } else if (cantAfford) {
+          actionLabel = `Can't afford ($${coach.weeklyCost}/week)`;
+          actionDisabled = true;
+        } else if (current) {
+          actionLabel = 'Replace';
+        }
+
+        card.innerHTML = `
+          <div class="coach-card-header">
+            <div class="coach-card-name">${_coachFlag(coach.nationality)} ${_coachDisplayName(coach)}</div>
+            <div class="coach-card-meta">$${coach.weeklyCost}/wk</div>
+          </div>
+          <div class="coach-card-meta">${coach.style} · Unlock ${coach.eloUnlock}</div>
+          <div class="coach-card-strengths">Themes: ${_themeLabelList(coach.primaryThemes)}</div>
+          <div class="coach-card-weaknesses">Bonus: +${coach.bonusMoves} Stockfish moves</div>
+          <div class="coach-card-background">${coach.background}</div>
+          <div class="coach-card-status ${locked ? 'locked' : (cantAfford ? 'warn' : '')}">
+            ${locked ? `Requires ${coach.eloUnlock} Elo` : (cantAfford ? `Can't afford $${coach.weeklyCost}/week` : 'Available')}
+          </div>
+          <button class="coach-card-action" type="button" ${actionDisabled ? 'disabled' : ''}>${actionLabel}</button>
+        `;
+
+        const actionBtn = card.querySelector('.coach-card-action');
+        if (actionBtn && !actionDisabled) {
+          actionBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            this.onHireCoach(coach.id);
+          });
+        }
+
+        grid.appendChild(card);
+      });
+    },
+
+    onSelectCoach(coachId) {
+      _selectedCoachId = coachId;
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      this.render();
+    },
+
+    onHireCoach(coachId) {
+      const current = StaffSystem.getCurrentCoach();
+      if (current && current.id !== coachId) {
+        _pendingReplaceCoachId = coachId;
+        const next = StaffSystem.getCoachById(coachId);
+        const body = document.getElementById('coach-replace-body');
+        const modal = document.getElementById('modal-coach-replace');
+        if (body && next) {
+          body.textContent =
+            `Fire ${_coachDisplayName(current)} and hire ${_coachDisplayName(next)}? Weekly cost changes from $${current.weeklyCost} to $${next.weeklyCost}.`;
+        }
+        if (modal) modal.showModal();
+        return;
+      }
+
+      const result = StaffSystem.hire(coachId);
+      if (result.ok) {
+        if (typeof SoundManager !== 'undefined') SoundManager.playGoodMove(2);
+      } else if (typeof SoundManager !== 'undefined') {
+        SoundManager.playBlunder();
+      }
+      this.render();
+    },
+
+    onConfirmReplace() {
+      if (!_pendingReplaceCoachId) return;
+      const modal = document.getElementById('modal-coach-replace');
+      const result = StaffSystem.hire(_pendingReplaceCoachId);
+      _pendingReplaceCoachId = null;
+      if (modal) modal.close();
+      if (result.ok) {
+        if (typeof SoundManager !== 'undefined') SoundManager.playGoodMove(2);
+      } else if (typeof SoundManager !== 'undefined') {
+        SoundManager.playBlunder();
+      }
+      this.render();
+    },
+
+    onFireCoach() {
+      const result = StaffSystem.fire();
+      if (result.ok && typeof SoundManager !== 'undefined') SoundManager.playMove();
+      this.render();
+    },
+
+    onBack() {
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      _showScreen('home');
+      home.render();
+    },
+  };
+
+  // ── Training hub ──────────────────────────────────────────
+
+  const training = {
+    _opponentReplyTimer: null,
+
+    render() {
+      const coach = typeof StaffSystem !== 'undefined' ? StaffSystem.getCurrentCoach() : null;
+      const summaryEl = document.getElementById('training-summary');
+      const preparedEl = document.getElementById('training-prepared');
+      const coachPanel = document.getElementById('training-coach-panel');
+      const selfPanel = document.getElementById('training-self-panel');
+      const sessionWrap = document.getElementById('training-session');
+      const summaryWrap = document.getElementById('training-session-summary');
+
+      if (summaryEl) {
+        summaryEl.textContent = coach
+          ? `${_coachFlag(coach.nationality)} ${_coachDisplayName(coach)} · +${coach.bonusMoves} on ${_themeLabelList(coach.primaryThemes)}`
+          : 'No coach hired. Self-training remains available on all 22 themes.';
+      }
+
+      if (preparedEl) {
+        const prepared = PuzzleSystem.getPreparedThemes();
+        preparedEl.textContent = prepared.length > 0
+          ? `Prepared for next tournament: ${prepared.map((theme) => PuzzleSystem.getThemeLabel(theme)).join(', ')}`
+          : 'No themes prepared for your next tournament yet.';
+      }
+
+      if (summaryWrap) summaryWrap.classList.toggle('hidden', !_trainingSummaryReady);
+      if (sessionWrap) sessionWrap.classList.toggle('hidden', !_activeTrainingSession || _trainingSummaryReady);
+
+      if (_trainingSummaryReady) {
+        if (coachPanel) coachPanel.classList.add('hidden');
+        if (selfPanel) selfPanel.classList.add('hidden');
+        return;
+      }
+
+      if (_activeTrainingSession) {
+        if (coachPanel) coachPanel.classList.add('hidden');
+        if (selfPanel) selfPanel.classList.add('hidden');
+        this._renderSession();
+        return;
+      }
+
+      if (coachPanel) {
+        coachPanel.classList.remove('hidden');
+        coachPanel.innerHTML = coach
+          ? this._buildThemePanel(
+              'With your coach',
+              `Coach bonus: +${coach.bonusMoves} Stockfish moves on these themes.`,
+              coach.primaryThemes,
+              true,
+            )
+          : `
+            <div class="training-panel-title">With your coach</div>
+            <div class="training-panel-empty">Hire a coach to unlock guided theme sessions.</div>
+          `;
+      }
+
+      if (selfPanel) {
+        selfPanel.classList.remove('hidden');
+        selfPanel.innerHTML = this._buildThemePanel(
+          'Self-training',
+          'Available every day, any theme, no coach bonus.',
+          PuzzleSystem.getThemes(),
+          false,
+        );
+      }
+
+      this.bindThemeButtons();
+    },
+
+    _buildThemePanel(title, subtitle, themes, coached) {
+      const items = themes.map((theme) => {
+        const verdict = PuzzleSystem.canStartTrainingSession(theme);
+        const status = PuzzleSystem.getTrainingBonusStatus(theme);
+        const disabled = !verdict.ok;
+        const label = status.lockedUntilTournamentEnd
+          ? 'Prepared for next tournament'
+          : 'Start session';
+        return `
+          <div class="training-theme-row">
+            <div class="training-theme-text">
+              <div class="training-theme-name">${PuzzleSystem.getThemeLabel(theme)}</div>
+              <div class="training-theme-meta">
+                Rating ${PuzzleSystem.getPuzzleRating(theme)} · Aptitude ${PuzzleSystem.getAptitude(theme)}${coached ? ' · Coach bonus active' : ''}
+              </div>
+            </div>
+            <button class="training-theme-action" type="button" data-theme="${theme}" ${disabled ? 'disabled' : ''}>${label}</button>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="training-panel-title">${title}</div>
+        <div class="training-panel-subtitle">${subtitle}</div>
+        <div class="training-theme-list">${items}</div>
+      `;
+    },
+
+    bindThemeButtons() {
+      document.querySelectorAll('.training-theme-action').forEach((btn) => {
+        btn.addEventListener('click', () => this.startSession(btn.dataset.theme));
+      });
+    },
+
+    startSession(theme) {
+      try {
+        _activeTrainingSession = PuzzleSystem.startSelfTrainingSession(theme);
+      } catch (err) {
+        console.error('[UICareer.training] Failed to start session:', err);
+        return;
+      }
+
+      _trainingSummaryReady = false;
+      this._primeRuntimeFromSession(_activeTrainingSession);
+      if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+      this.render();
+    },
+
+    _primeRuntimeFromSession(session) {
+      _trainingRuntime = {
+        selectedSquare: null,
+        phase: 'awaiting-player',
+        solutionIndex: 0,
+        chess: new Chess(session.currentPuzzle.fen),
+      };
+    },
+
+    _renderSession() {
+      const titleEl = document.getElementById('training-session-title');
+      const metaEl = document.getElementById('training-session-meta');
+      const streakEl = document.getElementById('training-progress-streak');
+      const solvedEl = document.getElementById('training-progress-solved');
+      const attemptsEl = document.getElementById('training-progress-attempts');
+      const statusEl = document.getElementById('training-session-status');
+
+      if (!_activeTrainingSession || !_trainingRuntime) return;
+
+      if (titleEl) titleEl.textContent = `Training — ${PuzzleSystem.getThemeLabel(_activeTrainingSession.theme)}`;
+      if (metaEl) {
+        metaEl.textContent = `Puzzle ${_activeTrainingSession.attemptsUsed + 1} · Theme rating ${PuzzleSystem.getPuzzleRating(_activeTrainingSession.theme)}`;
+      }
+      if (streakEl) streakEl.textContent = `${_activeTrainingSession.streak}/${PuzzleSystem.SESSION_STREAK_TARGET}`;
+      if (solvedEl) solvedEl.textContent = `${_activeTrainingSession.solvedTotal}/${PuzzleSystem.SESSION_SOLVE_TARGET}`;
+      if (attemptsEl) attemptsEl.textContent = `${_activeTrainingSession.attemptsRemaining}/${PuzzleSystem.SESSION_MAX_ATTEMPTS}`;
+      if (statusEl) {
+        statusEl.textContent = _trainingRuntime.phase === 'awaiting-opponent'
+          ? 'Coach line reply...'
+          : 'Solve the puzzle. Unlimited time, one attempt.';
+      }
+
+      this._renderTrainingBoard();
+    },
+
+    _renderTrainingBoard() {
+      const board = document.getElementById('training-board');
+      if (!board || !_activeTrainingSession || !_trainingRuntime) return;
+      board.innerHTML = '';
+
+      const getPiece = (sq) => _trainingRuntime.chess.get(sq);
+      const isFlipped = _trainingRuntime.chess.turn() === 'b';
+      const files = isFlipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
+      const ranks = isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
+      const moves = _trainingRuntime.selectedSquare
+        ? _trainingRuntime.chess.moves({ square: _trainingRuntime.selectedSquare, verbose: true })
+        : [];
+      const legalTargets = moves.map((move) => move.to);
+      const captureTargets = moves
+        .filter((move) => move.flags.includes('c') || move.flags.includes('e'))
+        .map((move) => move.to);
+
+      ranks.forEach((rank, ri) => {
+        files.forEach((file, fi) => {
+          const square = file + rank;
+          const piece = getPiece(square);
+          const isLight = (ri + fi) % 2 === 0;
+          const el = document.createElement('div');
+          el.className = 'square ' + (isLight ? 'light' : 'dark');
+          el.dataset.square = square;
+          if (square === _trainingRuntime.selectedSquare) el.classList.add('selected');
+          if (legalTargets.includes(square) && !captureTargets.includes(square)) el.classList.add('legal-move');
+          if (captureTargets.includes(square)) el.classList.add('legal-capture');
+
+          if (fi === 0) {
+            const r = document.createElement('span');
+            r.className = 'coord-rank';
+            r.textContent = rank;
+            el.appendChild(r);
+          }
+          if (ri === ranks.length - 1) {
+            const f = document.createElement('span');
+            f.className = 'coord-file';
+            f.textContent = file;
+            el.appendChild(f);
+          }
+
+          if (piece) {
+            const p = document.createElement('img');
+            p.className = 'piece';
+            p.src = UIManager.PIECES[piece.color + piece.type.toUpperCase()];
+            p.alt = piece.color + piece.type.toUpperCase();
+            p.draggable = false;
+            el.appendChild(p);
+          }
+
+          el.addEventListener('click', () => this.onSquareClick(square));
+          board.appendChild(el);
+        });
+      });
+    },
+
+    onSquareClick(square) {
+      if (!_activeTrainingSession || !_trainingRuntime) return;
+      if (_trainingRuntime.phase !== 'awaiting-player') return;
+
+      const piece = _trainingRuntime.chess.get(square);
+      const turn = _trainingRuntime.chess.turn();
+      if (piece && piece.color === turn) {
+        _trainingRuntime.selectedSquare = square;
+        this._renderSession();
+        return;
+      }
+
+      if (!_trainingRuntime.selectedSquare) return;
+
+      const from = _trainingRuntime.selectedSquare;
+      const promotion = piece && piece.type === 'p' && (square[1] === '1' || square[1] === '8') ? 'q' : '';
+      const uci = `${from}${square}${promotion}`;
+      const expected = _activeTrainingSession.currentPuzzle.solution[_trainingRuntime.solutionIndex];
+      _trainingRuntime.selectedSquare = null;
+
+      if (uci !== expected) {
+        this._resolveAttempt(false);
+        return;
+      }
+
+      const move = _trainingRuntime.chess.move({ from, to: square, promotion: promotion || 'q' });
+      if (!move) {
+        this._resolveAttempt(false);
+        return;
+      }
+
+      _trainingRuntime.solutionIndex += 1;
+      this._advanceTrainingLine();
+    },
+
+    _advanceTrainingLine() {
+      if (!_activeTrainingSession || !_trainingRuntime) return;
+      const solution = _activeTrainingSession.currentPuzzle.solution;
+
+      if (_trainingRuntime.solutionIndex >= solution.length) {
+        this._resolveAttempt(true);
+        return;
+      }
+
+      if (_trainingRuntime.solutionIndex % 2 === 1) {
+        _trainingRuntime.phase = 'awaiting-opponent';
+        this._renderSession();
+        clearTimeout(this._opponentReplyTimer);
+        this._opponentReplyTimer = setTimeout(() => {
+          if (!_trainingRuntime || !_activeTrainingSession) return;
+          const reply = solution[_trainingRuntime.solutionIndex];
+          const from = reply.slice(0, 2);
+          const to = reply.slice(2, 4);
+          const promotion = reply.length > 4 ? reply[4] : 'q';
+          const ok = _trainingRuntime.chess.move({ from, to, promotion });
+          if (!ok) {
+            this._resolveAttempt(false);
+            return;
+          }
+          _trainingRuntime.solutionIndex += 1;
+          if (_trainingRuntime.solutionIndex >= solution.length) {
+            this._resolveAttempt(true);
+            return;
+          }
+          _trainingRuntime.phase = 'awaiting-player';
+          this._renderSession();
+        }, 500);
+        return;
+      }
+
+      _trainingRuntime.phase = 'awaiting-player';
+      this._renderSession();
+    },
+
+    _resolveAttempt(solved) {
+      if (!_activeTrainingSession) return;
+      const result = PuzzleSystem.submitSessionAnswer(_activeTrainingSession.id, solved);
+      _activeTrainingSession = result.session;
+
+      if (_activeTrainingSession.status === 'completed') {
+        const summary = PuzzleSystem.completeSession(_activeTrainingSession.id);
+        _trainingSummaryReady = true;
+        _trainingRuntime = null;
+        CalendarSystem.advanceOneDay();
+        this._renderSessionSummary(summary);
+        this.render();
+        return;
+      }
+
+      this._primeRuntimeFromSession(_activeTrainingSession);
+      this._renderSession();
+    },
+
+    _renderSessionSummary(summary) {
+      const titleEl = document.getElementById('training-session-summary-title');
+      const bodyEl = document.getElementById('training-session-summary-body');
+      const buttonEl = document.getElementById('btn-training-summary-home');
+      if (titleEl) {
+        titleEl.textContent = summary.bonusGranted
+          ? `Bonus prepared: ${PuzzleSystem.getThemeLabel(summary.theme)}`
+          : `Session failed: ${PuzzleSystem.getThemeLabel(summary.theme)}`;
+      }
+      if (bodyEl) {
+        bodyEl.textContent = summary.bonusGranted
+          ? `Path: ${summary.path}. Rating now ${summary.rating}. Aptitude ${summary.aptitude}. One calendar day has passed.`
+          : `No bonus earned. Rating now ${summary.rating}. Queue size ${summary.reinforcementQueueSize}. One calendar day has passed.`;
+      }
+      if (buttonEl) {
+        buttonEl.onclick = () => this.onReturnHome();
+      }
+    },
+
+    onReturnHome() {
+      _activeTrainingSession = null;
+      _trainingRuntime = null;
+      _trainingSummaryReady = false;
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      _showScreen('home');
+      home.render();
+    },
+
+    onBack() {
+      this.onReturnHome();
+    },
+  };
+
   // ── Tournament lobby screen ──────────────────────────────
 
   const COUNTRY_FLAGS = {
@@ -430,9 +1007,9 @@ const UICareer = (() => {
     CN: '🇨🇳', CU: '🇨🇺', CZ: '🇨🇿', DK: '🇩🇰', EG: '🇪🇬', EN: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
     FR: '🇫🇷', DE: '🇩🇪', GE: '🇬🇪', HU: '🇭🇺', IN: '🇮🇳', IR: '🇮🇷',
     IL: '🇮🇱', IT: '🇮🇹', JP: '🇯🇵', KZ: '🇰🇿', MA: '🇲🇦', NL: '🇳🇱',
-    NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱', RO: '🇷🇴', RU: '🇷🇺',
+    NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱', PT: '🇵🇹', RO: '🇷🇴', RU: '🇷🇺',
     RS: '🇷🇸', ES: '🇪🇸', SE: '🇸🇪', CH: '🇨🇭', TR: '🇹🇷', UA: '🇺🇦',
-    GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳', AT: '🇦🇹', AD: '🇦🇩',
+    GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳', AT: '🇦🇹', AD: '🇦🇩', DZ: '🇩🇿',
   };
 
   const REASON_LABELS = {
@@ -992,6 +1569,24 @@ const UICareer = (() => {
       });
     }
 
+    const btnTraining = document.getElementById('btn-open-training');
+    if (btnTraining) {
+      btnTraining.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('training');
+        training.render();
+      });
+    }
+
+    const btnCoaches = document.getElementById('btn-open-coaches');
+    if (btnCoaches) {
+      btnCoaches.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('coaches');
+        coaches.render();
+      });
+    }
+
     // Lobby → back to home
     const btnLobbyBack = document.getElementById('btn-lobby-back');
     if (btnLobbyBack) {
@@ -1005,6 +1600,30 @@ const UICareer = (() => {
     const btnInboxBack = document.getElementById('btn-inbox-back');
     if (btnInboxBack) {
       btnInboxBack.addEventListener('click', () => inbox.onBack());
+    }
+
+    const btnCoachesBack = document.getElementById('btn-coaches-back');
+    if (btnCoachesBack) {
+      btnCoachesBack.addEventListener('click', () => coaches.onBack());
+    }
+
+    const btnTrainingBack = document.getElementById('btn-training-back');
+    if (btnTrainingBack) {
+      btnTrainingBack.addEventListener('click', () => training.onBack());
+    }
+
+    const btnCoachReplaceCancel = document.getElementById('btn-coach-replace-cancel');
+    if (btnCoachReplaceCancel) {
+      btnCoachReplaceCancel.addEventListener('click', () => {
+        const modal = document.getElementById('modal-coach-replace');
+        _pendingReplaceCoachId = null;
+        if (modal) modal.close();
+      });
+    }
+
+    const btnCoachReplaceConfirm = document.getElementById('btn-coach-replace-confirm');
+    if (btnCoachReplaceConfirm) {
+      btnCoachReplaceConfirm.addEventListener('click', () => coaches.onConfirmReplace());
     }
 
     // Tournament — Play round
@@ -1056,6 +1675,32 @@ const UICareer = (() => {
           inbox.render();
         }
       });
+
+      GameEvents.on(GameEvents.EVENTS.COACH_HIRED, () => {
+        home.renderCoachButton();
+        home.renderTrainingButton();
+        const coachScreen = document.getElementById('screen-coaches');
+        if (coachScreen && !coachScreen.classList.contains('hidden')) {
+          coaches.render();
+        }
+        const trainingScreen = document.getElementById('screen-training');
+        if (trainingScreen && !trainingScreen.classList.contains('hidden')) {
+          training.render();
+        }
+      });
+
+      GameEvents.on(GameEvents.EVENTS.COACH_FIRED, () => {
+        home.renderCoachButton();
+        home.renderTrainingButton();
+        const coachScreen = document.getElementById('screen-coaches');
+        if (coachScreen && !coachScreen.classList.contains('hidden')) {
+          coaches.render();
+        }
+        const trainingScreen = document.getElementById('screen-training');
+        if (trainingScreen && !trainingScreen.classList.contains('hidden')) {
+          training.render();
+        }
+      });
     },
 
     showScreen: _showScreen,
@@ -1063,6 +1708,8 @@ const UICareer = (() => {
     home,
     lobby,
     inbox,
+    coaches,
+    training,
     tournament,
   };
 

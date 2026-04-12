@@ -13,6 +13,9 @@
 //   MAIL_RECEIVED       = 'mail_received'       // { mailId, templateId, vars, date, tag }
 //   BONUS_INVOKED       = 'bonus_invoked'       // { source: 'training'|'flow', theme?, coachId? }
 //   BONUS_RESOLVED      = 'bonus_resolved'      // { source, theme, success, movesGranted, coachId?, puzzleId }
+//   FLOW_BONUS_EARNED   = 'flow_bonus_earned'   // { flowPalier }
+//   COACH_HIRED         = 'coach_hired'         // { coachId, weeklyCost, eloUnlock }
+//   COACH_FIRED         = 'coach_fired'         // { coachId, reason: 'manual'|'cant_afford' }
 //
 // DISCIPLINE: event handlers MUST NOT emit a new event during their own
 // execution. Cascading synchronous emits on the same tick lead to
@@ -29,6 +32,9 @@ const GameEvents = (() => {
     MAIL_RECEIVED:       'mail_received',
     BONUS_INVOKED:       'bonus_invoked',
     BONUS_RESOLVED:      'bonus_resolved',
+    FLOW_BONUS_EARNED:   'flow_bonus_earned',
+    COACH_HIRED:         'coach_hired',
+    COACH_FIRED:         'coach_fired',
   };
 
   /** @type {Map<string, Set<Function>>} */

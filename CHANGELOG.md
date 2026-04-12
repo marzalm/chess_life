@@ -9,6 +9,190 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### E.5: Training Hub, per-theme ratings, and tournament preparation (2026-04-12)
+
+Phase E closes with the missing out-of-game training loop: coach-led or
+self-directed puzzle sessions on the board, per-theme progression, and
+tournament-scoped preparation bonuses.
+
+#### 1. Training Hub and session flow
+
+- added a dedicated Training Hub screen with coach-theme sessions when a
+  coach is hired, plus self-training access across all 22 themes
+- training sessions now run directly on the puzzle board without Blitz
+  Decay and use the locked `3-streak / 6 solves / 18 attempts` rules
+- each completed session advances the in-game calendar by exactly **1
+  day** through the new `CalendarSystem.advanceOneDay()`
+
+#### 2. Puzzle progression redesign
+
+- `PuzzleSystem` now stores **per-theme** ratings and rating deviations
+  via `training.puzzleRatings[theme]` and `training.puzzleRatingRds[theme]`
+- legacy global `puzzleRating` / `puzzleRatingRd` saves are migrated on
+  init, and aptitude is now derived from theme rating instead of stored
+  separately
+- training sessions update theme rating with
+  `TRAINING_K_FACTOR_MULT = 0.25`, keeping real-game puzzle pressure as
+  the faster progression path
+
+#### 3. Tournament-scoped training bonuses
+
+- training bonuses are no longer permanent stackable charges
+- a successful session now prepares a theme for the **next tournament**,
+  making it usable once per game during that tournament
+- prepared themes reset at the start of each new game and are cleared
+  automatically when the tournament finalizes
+
+#### 4. Coach model simplification
+
+- replaced the old 22-skill coach grid with the simpler E.5 model:
+  `primaryThemes[]` + explicit `bonusMoves`
+- `StaffSystem.getCurrentCoachBonusMoves(theme)` now returns the tier
+  bonus only on themes actually covered by the current coach
+- the coach browser UI was simplified accordingly: no skill bars, only
+  themes, cost, unlock, bonus, flavor, and hire/replace actions
+
+#### 5. Tests
+
+- added `CalendarSystem.advanceOneDay()` coverage and expanded
+  `PuzzleSystem` to cover session flow, migration, per-theme ratings,
+  prepared-theme semantics, and invariants
+- all 9 suites are green at **278 tests**
+
+### E.4 final fixes: Flow color matching and per-palier earning (2026-04-12)
+
+Final polish pass before closing Phase E.
+
+- `PuzzleSystem.pickFlowPuzzle()` now accepts an optional
+  `preferredColor` and filters unseen Flow puzzles by the live
+  player color when possible, with the same defensive fallback as
+  training-bonus puzzle selection.
+- `BonusSystem.invokeFlowBonus()` now passes
+  `ChessEngine.getPlayerColor()` into `pickFlowPuzzle()`, so Flow
+  puzzles match the side the player is currently playing in the game.
+- `FocusSystem` now emits `flow_bonus_earned` on **every upward Flow
+  palier transition**, not only on `0 -> 1+`. Because the Flow slot is
+  still non-accumulating, this means the player can earn a fresh bonus
+  at Flow II / III / MAX after spending the previous one, while
+  climbing again with an unused charge does nothing.
+- Tests now cover Flow color filtering and the per-palier earning rule.
+  All 9 suites remain green.
+
+### E.4: Flow bonus integration and Blitz Decay (2026-04-12)
+
+Phase E.4 completes the hidden-trainer loop by adding the second
+bonus source and replacing the fixed bonus reward with a speed-based
+Blitz Decay tier system.
+
+#### 1. Blitz Decay timing and puzzle-mode UI
+
+- `js/bonus-system.js` now computes reward tiers from a continuous
+  Blitz Decay timer using locked constants:
+  `BLITZ_DRAIN_BASE_MS = 27000`, `BLITZ_DRAIN_EXPONENT = 1.25`,
+  `BLITZ_FAST_CUTOFF = 2/3`, `BLITZ_MEDIUM_CUTOFF = 1/3`
+- the fuse bar is now a **vertical bar on the right side of the board**
+  with bottom-to-top fill and continuous green→yellow→red decay
+- training-bonus rewards are no longer fixed at base 2; successful
+  solves now grant tier base `3 / 2 / 1` plus aptitude and coach bonus
+
+#### 2. Flow bonus lifecycle
+
+- added `flow_bonus_earned` to `js/game-events.js`
+- `FocusSystem` now emits `flow_bonus_earned` on each upward Flow
+  palier transition while `PuzzleSystem` keeps the slot non-accumulating,
+  and clears any unspent Flow bonus on Flow exit
+- `PuzzleSystem` gained `pickFlowPuzzle()`, `hasFlowBonus()`,
+  `earnFlowBonus()`, `consumeFlowBonus()`, and `clearFlowBonus()`
+- Flow invocation uses unseen puzzles only, hides the theme during the
+  puzzle, and reveals it after resolution
+
+#### 3. Outcome and reward resolution
+
+- `BonusSystem` now supports both training and Flow invocation paths
+  with a unified `getRewardMoveCount(theme, tierBaseMoves)`
+- Flow success/failure uses a two-phase reveal card:
+  `Theme revealed` for `500ms`, then the full breakdown for `1500ms`
+- Flow coach quality is read from the **revealed** theme using the
+  same locked `StaffSystem.getCoachMoveBonus(skill)` mapping as E.3
+
+#### 4. Tests
+
+- `tests/puzzle-system.test.js` now covers `pickFlowPuzzle()` and
+  unseen-pool exhaustion
+- `tests/bonus-system.test.js` now covers:
+  Blitz Decay fast/medium/slow tiers, longer-line scaling, Flow
+  bonus appearance/loss on Flow exit, hidden-theme invocation,
+  reveal-card content, and revealed-theme coach bonuses
+- total suite count is now **263 green tests** across 9 suites
+
+### Focus cutoff in hopeless positions (2026-04-12)
+
+Small pre-E.4 integrity fix for the Focus / Flow loop.
+
+- `js/focus-system.js` now hard-cuts the existing `oneSided`
+  multiplier to `0` when the player is badly losing:
+  `cpBefore <= -800` with `pieceCount <= 10`, or `cpBefore <= -1500`
+  regardless of material.
+- This prevents Focus / Flow farming in dead-lost positions where
+  the player is only finding forced legal moves.
+- Added a new `tests/focus-system.test.js` suite covering the two
+  losing cutoffs and the non-zero winning-side case.
+
+### E.3: coach system, weekly pay, coach UI, and inbox hooks (2026-04-12)
+
+Phase E.3 ships the single-slot coach layer on top of the E.1/E.2
+training systems: a static catalog of 10 coaches, persistent hire/fire
+logic, automatic weekly pay, coach browser UI, coach inbox mails, and
+coach quality wired into bonus rewards.
+
+#### 1. Static coach catalog + staff domain
+
+- added `js/coach-data.js` with the locked 10-coach catalog:
+  2 starters, 3 mid specialists, 3 mid balanced, 1 elite balanced,
+  1 elite specialist
+- added `js/staff-system.js` with a single-slot coach model:
+  `getCurrentCoach`, `canHire`, `hire`, `fire`, `processWeeklyCost`,
+  `getCoachMoveBonus`, and catalog accessors
+- persisted `staff.currentCoach` as `{ id, hireDate, lastPaidDate }`
+  without touching player-owned training state
+
+#### 2. Calendar day-tick hook + weekly cost processing
+
+- `calendar-system.js` now exposes a per-day tick hook and fires it
+  **once per day increment inside `continue()`**, including full
+  365-day skips with no events
+- `StaffSystem` subscribes to that hook and deducts coach cost every
+  7 in-game days
+- insufficient funds auto-fire the coach with a reactive `coach_fired`
+  event instead of introducing debt or blocking calendar advancement
+
+#### 3. Coach events, inbox mails, and reward quality
+
+- added `coach_hired` and `coach_fired` to `game-events.js`
+- `InboxSystem` now reacts to those events with three templates:
+  hire, manual dismissal, and dismissal for insufficient funds
+- `BonusSystem.getRewardMoveCount(theme)` now layers coach quality on
+  top of the existing base-2 + aptitude reward using
+  `StaffSystem.getCoachMoveBonus(skill)`
+
+#### 4. Dedicated coaches screen and home integration
+
+- added a full `#screen-coaches` browser with current-coach status,
+  card grid, replace confirm modal, and grouped 22-theme skill bars
+- home now shows `👨‍🏫 Hire a coach` when empty or `👨‍🏫 Your coach`
+  plus the active coach name and weekly cost when filled
+- coach cards visibly distinguish locked Elo gates, affordability, and
+  current/replace states
+
+#### 5. Tests
+
+- new `tests/staff-system.test.js` with **19** passing tests
+- `tests/calendar-system.test.js` gains the locked day-tick cap test
+- `tests/inbox-system.test.js` now covers coach hire/fire mails
+- `tests/bonus-system.test.js` now exercises the coach bonus path in
+  `getRewardMoveCount`
+- total suite count is now **249 green tests** across 8 suites
+
 ### E.2 playtest fixes round 4: playback deadlock (2026-04-12)
 
 Fourth and final E.2 bugfix pass.

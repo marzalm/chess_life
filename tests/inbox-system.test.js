@@ -9,6 +9,7 @@ const path = require('path');
 
 let InboxSystem;
 let InboxTemplates;
+let CoachData;
 let CareerManager;
 let CalendarSystem;
 let GameEvents;
@@ -24,6 +25,8 @@ function buildGameEventsMock() {
     EVENTS: {
       TOURNAMENT_FINISHED: 'tournament_finished',
       MAIL_RECEIVED: 'mail_received',
+      COACH_HIRED: 'coach_hired',
+      COACH_FIRED: 'coach_fired',
     },
     on(eventName, handler) {
       const bucket = listeners.get(eventName) || new Set();
@@ -93,14 +96,20 @@ function reset() {
   );
   InboxTemplates = (new Function(`${templatesCode}\nreturn InboxTemplates;`))();
 
+  const coachDataCode = fs.readFileSync(
+    path.join(__dirname, '..', 'js', 'coach-data.js'),
+    'utf8',
+  );
+  CoachData = (new Function(`${coachDataCode}\nreturn CoachData;`))();
+
   const systemCode = fs.readFileSync(
     path.join(__dirname, '..', 'js', 'inbox-system.js'),
     'utf8',
   );
   InboxSystem = (new Function(
-    'CareerManager', 'CalendarSystem', 'GameEvents', 'InboxTemplates',
+    'CareerManager', 'CalendarSystem', 'GameEvents', 'InboxTemplates', 'CoachData',
     `${systemCode}\nreturn InboxSystem;`,
-  ))(CareerManager, CalendarSystem, GameEvents, InboxTemplates);
+  ))(CareerManager, CalendarSystem, GameEvents, InboxTemplates, CoachData);
 }
 
 let passed = 0;
@@ -393,6 +402,40 @@ function assertEq(actual, expected, msg) {
     const federation = _inboxState.mails.find((m) => m.templateId === 'federation_elo_confirmation');
     assert(federation.body.includes('1512'));
     assert(federation.body.includes('+12'));
+  });
+
+  await test('COACH_HIRED auto-pushes a hire mail', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.COACH_HIRED, {
+      coachId: 'coach_petrova_elena',
+      weeklyCost: 150,
+      eloUnlock: 1300,
+    });
+    await flushMicrotasks();
+    assertEq(_inboxState.mails.length, 1);
+    assertEq(_inboxState.mails[0].templateId, 'inbox_coach_hired');
+    assert(_inboxState.mails[0].subject.includes('Elena Petrova'));
+  });
+
+  await test('COACH_FIRED manual auto-pushes the dismissal mail', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.COACH_FIRED, {
+      coachId: 'coach_meyer_luc',
+      reason: 'manual',
+    });
+    await flushMicrotasks();
+    assertEq(_inboxState.mails[0].templateId, 'inbox_coach_fired_manual');
+  });
+
+  await test('COACH_FIRED cant_afford auto-pushes the no-funds mail', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.COACH_FIRED, {
+      coachId: 'coach_rinaldi_marco',
+      reason: 'cant_afford',
+    });
+    await flushMicrotasks();
+    assertEq(_inboxState.mails[0].templateId, 'inbox_coach_fired_no_funds');
+    assert(_inboxState.mails[0].body.includes('$520'));
   });
 
   console.log(`\nResult: ${passed} passed, ${failed} failed\n`);

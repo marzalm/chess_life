@@ -107,7 +107,7 @@
 
 /**
  * @typedef {object} StaffState
- * @property {{ id: string, hireDate: CalendarDate } | null} currentCoach
+ * @property {{ id: string, hireDate: CalendarDate, lastPaidDate: CalendarDate } | null} currentCoach
  */
 
 /**
@@ -124,13 +124,12 @@
 
 /**
  * @typedef {object} TrainingState
- * @property {Object.<string, number>} aptitudes
  * @property {Object.<string, 1>} seenPuzzleIds
  * @property {Object.<string, Array<{ puzzleId: string, state: string, confirmations: number }>>} reinforcementQueues
- * @property {Object.<string, number>} trainingBonuses
+ * @property {Object.<string, { prepared: boolean, usedThisGame: boolean, lockedUntilTournamentEnd: boolean }>} trainingBonuses
  * @property {{ earned: boolean, reservedPuzzleId: string | null }} flowBonus
- * @property {number} puzzleRating
- * @property {number} puzzleRatingRd
+ * @property {Object.<string, number>} puzzleRatings
+ * @property {Object.<string, number>} puzzleRatingRds
  * @property {TrainingStats} stats
  */
 
@@ -193,7 +192,6 @@ const CareerManager = (() => {
     inbox: { mails: [] },
     staff: { currentCoach: null },
     training: {
-      aptitudes: {},
       seenPuzzleIds: {},
       reinforcementQueues: {},
       trainingBonuses: {},
@@ -201,8 +199,8 @@ const CareerManager = (() => {
         earned: false,
         reservedPuzzleId: null,
       },
-      puzzleRating: 500,
-      puzzleRatingRd: 300,
+      puzzleRatings: {},
+      puzzleRatingRds: {},
       stats: {
         sessionsCompleted: 0,
         sessionsPassed: 0,
@@ -468,6 +466,16 @@ const CareerManager = (() => {
       get() {
         _ensure();
         return _state.inbox;
+      },
+    },
+
+    // ── STAFF DOMAIN ───────────────────────────────────────────
+
+    staff: {
+      /** @returns {StaffState} live reference. */
+      get() {
+        _ensure();
+        return _state.staff;
       },
     },
 

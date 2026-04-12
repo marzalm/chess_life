@@ -363,6 +363,16 @@ const FocusSystem = {
       if (absBefore > 200) {
         oneSided = Math.max(0.20, 1.0 - (absBefore - 200) / 800);
       }
+
+      // Hard cutoff in hopeless positions: if the player is badly
+      // losing, stop all Focus interaction entirely so "only legal
+      // moves" in a dead-lost position cannot farm Flow momentum.
+      if (cpBefore <= -800 && pieceCount != null && pieceCount <= 10) {
+        oneSided = 0;
+      }
+      if (cpBefore <= -1500) {
+        oneSided = 0;
+      }
     }
 
     // Classification du coup (pour l'UI : historique + texte flottant)
@@ -482,6 +492,14 @@ const FocusSystem = {
 
       // Son Flow State
       if (typeof SoundManager !== 'undefined') SoundManager.playFlowEnter(newPalier);
+
+      if (typeof GameEvents !== 'undefined' &&
+          GameEvents.EVENTS &&
+          GameEvents.EVENTS.FLOW_BONUS_EARNED) {
+        GameEvents.emit(GameEvents.EVENTS.FLOW_BONUS_EARNED, {
+          flowPalier: newPalier,
+        });
+      }
     }
   },
 
@@ -519,8 +537,14 @@ const FocusSystem = {
     }
 
     if (wasInFlow) {
+      if (typeof PuzzleSystem !== 'undefined' && PuzzleSystem.clearFlowBonus) {
+        PuzzleSystem.clearFlowBonus();
+      }
       this._log(0, 'Flow State terminé');
       if (typeof SoundManager !== 'undefined') SoundManager.playFlowExit();
+      if (typeof BonusSystem !== 'undefined' && BonusSystem.renderInventory) {
+        BonusSystem.renderInventory();
+      }
     }
   },
 

@@ -51,6 +51,9 @@ const CalendarSystem = (() => {
   const DOW_NAMES_LONG  = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const DOW_NAMES_SHORT = ['Mon',    'Tue',     'Wed',       'Thu',      'Fri',    'Sat',      'Sun'];
 
+  /** @type {Set<Function>} */
+  const _dayTickHandlers = new Set();
+
   // ── GREGORIAN DATE MATH (self-contained, no Date objects) ──
 
   function _isLeap(year) {
@@ -192,6 +195,16 @@ const CalendarSystem = (() => {
       i += 1;
     }
     events.splice(i, 0, ev);
+  }
+
+  function _fireDayTickHandlers(date) {
+    for (const handler of _dayTickHandlers) {
+      try {
+        handler(_cloneDate(date));
+      } catch (err) {
+        console.error('[Calendar] Day tick handler failed:', err);
+      }
+    }
   }
 
   // ── PHASE TRANSITIONS ───────────────────────────────────────
@@ -369,6 +382,18 @@ const CalendarSystem = (() => {
       return _state().events.length;
     },
 
+    onDayAdvanced(handler) {
+      if (typeof handler !== 'function') {
+        throw new Error('[Calendar] onDayAdvanced handler must be a function');
+      }
+      _dayTickHandlers.add(handler);
+      return () => this.offDayAdvanced(handler);
+    },
+
+    offDayAdvanced(handler) {
+      _dayTickHandlers.delete(handler);
+    },
+
     // ── Continue button ─────────────────────────────────────
 
     /**
@@ -405,10 +430,23 @@ const CalendarSystem = (() => {
         // No event today → advance one day
         s.date = _addOneDay(s.date);
         daysAdvanced += 1;
+        _fireDayTickHandlers(s.date);
       }
 
       _persist();
       return { stoppedBy: 'limit', event: null, daysAdvanced };
+    },
+
+    /**
+     * Advance the calendar by exactly one day, fire day-tick handlers,
+     * persist, and leave phase/event state unchanged.
+     */
+    advanceOneDay() {
+      const s = _state();
+      s.date = _addOneDay(s.date);
+      _fireDayTickHandlers(s.date);
+      _persist();
+      return _cloneDate(s.date);
     },
 
     /**

@@ -43,6 +43,11 @@ const InboxSystem = (() => {
     return n > 0 ? `+${n}` : String(n);
   }
 
+  function _getCoach(coachId) {
+    if (typeof CoachData === 'undefined' || !Array.isArray(CoachData)) return null;
+    return CoachData.find((coach) => coach.id === coachId) || null;
+  }
+
   function _scheduleTournamentPressMail(summary) {
     queueMicrotask(() => {
       const player = CareerManager.player.get();
@@ -79,6 +84,29 @@ const InboxSystem = (() => {
     });
   }
 
+  function _scheduleCoachHiredMail(payload) {
+    queueMicrotask(() => {
+      const coach = _getCoach(payload.coachId);
+      InboxSystem.push('inbox_coach_hired', {
+        coachName: coach ? `${coach.title} ${coach.name}` : 'Your new coach',
+        weeklyCost: payload.weeklyCost ?? (coach ? coach.weeklyCost : '???'),
+      });
+    });
+  }
+
+  function _scheduleCoachFiredMail(payload) {
+    queueMicrotask(() => {
+      const coach = _getCoach(payload.coachId);
+      const templateId = payload.reason === 'cant_afford'
+        ? 'inbox_coach_fired_no_funds'
+        : 'inbox_coach_fired_manual';
+      InboxSystem.push(templateId, {
+        coachName: coach ? `${coach.title} ${coach.name}` : 'Your coach',
+        weeklyCost: coach ? coach.weeklyCost : '???',
+      });
+    });
+  }
+
   return {
     init() {
       if (_initialized) return;
@@ -92,6 +120,16 @@ const InboxSystem = (() => {
       GameEvents.on(
         GameEvents.EVENTS.TOURNAMENT_FINISHED,
         (summary) => _scheduleFederationMail(summary),
+      );
+
+      GameEvents.on(
+        GameEvents.EVENTS.COACH_HIRED,
+        (payload) => _scheduleCoachHiredMail(payload),
+      );
+
+      GameEvents.on(
+        GameEvents.EVENTS.COACH_FIRED,
+        (payload) => _scheduleCoachFiredMail(payload),
       );
     },
 

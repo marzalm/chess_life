@@ -394,6 +394,31 @@ test('continue — empty queue hits cap', () => {
   assert(CalendarSystem.isIdle());
 });
 
+test('advanceOneDay increments the date by exactly one day and fires tick handlers once', () => {
+  CalendarSystem.init();
+  let ticks = 0;
+  const unsubscribe = CalendarSystem.onDayAdvanced(() => {
+    ticks += 1;
+  });
+  const next = CalendarSystem.advanceOneDay();
+  unsubscribe();
+  assertEq(next, {year:2026, month:4, day:11});
+  assertEq(CalendarSystem.getDate(), {year:2026, month:4, day:11});
+  assertEq(ticks, 1);
+});
+
+test('continue — day tick handlers fire once per day advanced up to the cap', () => {
+  CalendarSystem.init();
+  let ticks = 0;
+  const unsubscribe = CalendarSystem.onDayAdvanced(() => {
+    ticks += 1;
+  });
+  const r = CalendarSystem.continue();
+  unsubscribe();
+  assertEq(r.daysAdvanced, 365);
+  assertEq(ticks, 365);
+});
+
 test('continue — from non-idle throws', () => {
   CalendarSystem.init();
   CalendarSystem.enterTournament();

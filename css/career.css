@@ -679,6 +679,13 @@
     3px 3px 0 rgba(0,0,0,0.4);
 }
 
+.career-primary-btn-coach {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 .career-primary-btn:hover {
   transform: translate(-1px, -1px);
 }
@@ -703,6 +710,449 @@
 
 .career-inbox-badge.hidden {
   display: none;
+}
+
+.career-coach-button-note {
+  display: block;
+  font-size: 7px;
+  color: rgba(26,26,46,0.82);
+}
+
+.career-coach-button-note.hidden {
+  display: none;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   COACHES SCREEN
+   ════════════════════════════════════════════════════════════════ */
+
+#screen-coaches {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 16px 40px;
+  min-height: 100vh;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--px-text);
+}
+
+.coaches-back-btn {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  background: var(--px-panel);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 6px 12px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+.coaches-back-btn:hover {
+  background: var(--px-panel-dark);
+  color: var(--px-accent);
+}
+
+.coaches-wrap {
+  width: 100%;
+  max-width: 1120px;
+}
+
+.coaches-header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.coaches-title {
+  font-size: 16px;
+  color: var(--px-accent);
+  margin-bottom: 10px;
+}
+
+.coaches-summary {
+  font-size: 9px;
+  color: var(--px-text-dim);
+}
+
+.coaches-current-panel,
+.coach-detail-pane {
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.35);
+}
+
+.coaches-current-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.coaches-current-empty,
+.coaches-current-hired {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.coaches-current-title {
+  font-size: 10px;
+  color: var(--px-accent);
+  margin-bottom: 10px;
+}
+
+.coaches-current-name {
+  font-size: 12px;
+  color: var(--px-gold);
+  margin-bottom: 8px;
+}
+
+.coaches-current-meta,
+.coaches-current-note {
+  font-size: 8px;
+  line-height: 1.7;
+  color: var(--px-text-dim);
+}
+
+.coaches-current-fire,
+.coach-card-action,
+.coach-detail-action {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  border: 2px solid var(--px-border);
+  background: var(--px-panel-dark);
+  color: var(--px-text);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.coaches-current-fire:hover,
+.coach-card-action:hover,
+.coach-detail-action:hover {
+  border-color: var(--px-accent);
+  color: var(--px-accent);
+}
+
+.coach-card-action:disabled,
+.coach-detail-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.coaches-browser-layout {
+  display: block;
+}
+
+.coaches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TRAINING HUB
+   ════════════════════════════════════════════════════════════════ */
+
+#screen-training {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 16px 40px;
+  min-height: 100vh;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--px-text);
+}
+
+.training-wrap {
+  width: 100%;
+  max-width: 1120px;
+}
+
+.training-header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.training-title {
+  font-size: 16px;
+  color: var(--px-accent);
+  margin-bottom: 10px;
+}
+
+.training-summary,
+.training-prepared {
+  font-size: 9px;
+  color: var(--px-text-dim);
+  line-height: 1.7;
+}
+
+.training-panel,
+.training-session,
+.training-session-summary {
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.35);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.training-panel-title,
+.training-session-title,
+.training-session-summary-title {
+  font-size: 11px;
+  color: var(--px-gold);
+  margin-bottom: 10px;
+}
+
+.training-panel-subtitle,
+.training-session-meta,
+.training-session-status,
+.training-session-summary-body {
+  font-size: 8px;
+  line-height: 1.8;
+  color: var(--px-text-dim);
+}
+
+.training-theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.training-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 2px solid rgba(255,255,255,0.08);
+  background: rgba(8,18,40,0.34);
+}
+
+.training-theme-name {
+  font-size: 9px;
+  color: var(--px-accent);
+  margin-bottom: 6px;
+}
+
+.training-theme-meta {
+  font-size: 7px;
+  color: var(--px-text-dim);
+  line-height: 1.7;
+}
+
+.training-theme-action {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  border: 2px solid var(--px-gold);
+  background: var(--px-panel-dark);
+  color: var(--px-gold);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.training-theme-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.training-panel-empty {
+  font-size: 8px;
+  color: var(--px-text-dim);
+  line-height: 1.8;
+}
+
+.training-progress-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.training-progress-box {
+  padding: 12px;
+  border: 2px solid rgba(255,255,255,0.08);
+  background: rgba(8,18,40,0.34);
+  text-align: center;
+}
+
+.training-progress-label {
+  font-size: 7px;
+  color: var(--px-text-dim);
+  margin-bottom: 8px;
+}
+
+.training-progress-value {
+  font-size: 10px;
+  color: var(--px-accent);
+}
+
+.training-board-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.training-board-container {
+  position: relative;
+  width: 576px;
+  height: 576px;
+  border: 4px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.35);
+}
+
+.training-board {
+  display: grid;
+  grid-template-columns: repeat(8, 72px);
+  grid-template-rows: repeat(8, 72px);
+  width: 576px;
+  height: 576px;
+}
+
+.training-session.hidden,
+.training-session-summary.hidden,
+.training-panel.hidden {
+  display: none;
+}
+
+.coach-card {
+  background: var(--px-panel);
+  border: 3px solid var(--px-border);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.15),
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    4px 4px 0 rgba(0,0,0,0.35);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  position: relative;
+}
+
+.coach-card.selected {
+  border-color: var(--px-accent);
+}
+
+.coach-card.locked {
+  opacity: 0.62;
+}
+
+.coach-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coach-card-name {
+  font-size: 10px;
+  color: var(--px-accent);
+  line-height: 1.5;
+}
+
+.coach-card-meta,
+.coach-card-background,
+.coach-card-strengths,
+.coach-card-weaknesses,
+.coach-card-status {
+  font-size: 7px;
+  line-height: 1.7;
+  color: var(--px-text-dim);
+}
+
+.coach-card-status.locked {
+  color: var(--px-red);
+}
+
+.coach-card-status.warn {
+  color: var(--px-accent);
+}
+
+.coach-detail-pane {
+  padding: 18px;
+}
+
+.coach-detail-empty {
+  min-height: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1.7;
+  color: var(--px-text-dim);
+}
+
+.coach-detail-title {
+  font-size: 11px;
+  color: var(--px-accent);
+  margin-bottom: 8px;
+}
+
+.coach-detail-subtitle,
+.coach-detail-background {
+  font-size: 8px;
+  line-height: 1.7;
+  color: var(--px-text-dim);
+  margin-bottom: 12px;
+}
+
+.coach-detail-group {
+  margin-bottom: 14px;
+}
+
+.coach-detail-group-title {
+  font-size: 8px;
+  color: var(--px-gold);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.coach-skill-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 34px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.coach-skill-name,
+.coach-skill-value {
+  font-size: 7px;
+  color: var(--px-text);
+}
+
+.coach-skill-bar {
+  height: 10px;
+  background: var(--px-panel-dark);
+  border: 1px solid var(--px-border);
+  position: relative;
+}
+
+.coach-skill-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, var(--px-accent), var(--px-gold));
+}
+
+@media (max-width: 980px) {
+  .coaches-browser-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════

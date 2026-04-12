@@ -795,6 +795,9 @@ const TournamentSystem = (() => {
 
       const history = CareerManager.history.get();
       history.tournaments.push(summary);
+      if (typeof PuzzleSystem !== 'undefined' && PuzzleSystem.clearTrainingBonusesAfterTournament) {
+        PuzzleSystem.clearTrainingBonusesAfterTournament();
+      }
 
       // Advance the calendar by daysDuration days
       cal.date              = _cloneDate(finalDate);

@@ -167,7 +167,15 @@ Cette phase est la **première manifestation concrète de l'entraîneur caché**
 
 `finance-system.js` reste minimal en Phase E : coût hebdomadaire du coach, inscriptions payantes, dépenses simples. Pas de sponsors ni de revenus secondaires à ce stade.
 
-`staff-system.js` gère un **slot unique de coach**. Le joueur peut engager / licencier / remplacer, mais ne peut jamais posséder deux coachs en parallèle. Un coach est une **personne** avec un profil de compétence couvrant **22 thèmes verrouillés** :
+`staff-system.js` gère un **slot unique de coach**. Le joueur peut engager / licencier / remplacer, mais ne peut jamais posséder deux coachs en parallèle. En Phase E.5, le modèle coach a été **simplifié** : chaque coach a un petit ensemble de `primaryThemes[]` (1 thème pour les starters, 2 pour les mid, 3-4 pour les elite) et un bonus explicite `bonusMoves` dépendant du tier :
+
+- starter → `+1`
+- mid → `+2`
+- elite → `+3`
+
+Le bonus du coach s'applique **uniquement** sur ses thèmes primaires. Hors de ces thèmes, le coach donne `+0`. Le vieux profil `skills[theme]` à 22 entrées a été supprimé : plus de bars de skill, plus de mapping `0..100`, plus de `getCoachMoveBonus(skill)` caché. Le coach screen affiche désormais seulement : identité, coût hebdomadaire, Elo unlock, thèmes couverts, bonus, background.
+
+Les puzzles restent organisés autour de **22 thèmes verrouillés** :
 
 - Motifs : `fork`, `pin`, `skewer`, `discoveredAttack`, `hangingPiece`, `sacrifice`, `trappedPiece`, `attackingF2F7`
 - Mates : `mateIn1`, `mateIn2`, `backRankMate`
@@ -175,27 +183,25 @@ Cette phase est la **première manifestation concrète de l'entraîneur caché**
 - Avancés : `deflection`, `attraction`
 - Ouvertures : `ruyLopez`, `sicilianDefense`, `frenchDefense`, `caroKannDefense`, `italianGame`, `queensPawnGame`
 
-Chaque coach possède `skills[theme]` pour les 22 thèmes ci-dessus, score `0..100`. Il n'existe **aucun plancher caché** : un coach faible sur un thème donne réellement `+0` move sur ce thème. Le mapping qualité → moves supplémentaires est verrouillé et encapsulé dans un helper unique `getCoachMoveBonus(skill)` :
-
-- `0..20` → `+0`
-- `21..50` → `+1`
-- `51..80` → `+2`
-- `81..100` → `+3`
-
-`puzzle-system.js` gère les puzzles thématiques (FEN + séquence solution + thème + difficulté), l'aptitude par thème, le suivi des puzzles vus, et la boucle de renforcement inspirée de Lucas Chess. Les échecs entrent dans une queue de renforcement **player-owned** et n'appartiennent pas au coach : changer de coach ne réinitialise ni l'aptitude, ni les puzzles vus, ni les bonus gagnés, ni les puzzles à réviser.
+`puzzle-system.js` gère les puzzles thématiques (FEN + séquence solution + thème + difficulté), le suivi des puzzles vus, la boucle de renforcement inspirée de Lucas Chess, et désormais une **rating curve par thème** : `training.puzzleRatings[theme]` + `training.puzzleRatingRds[theme]`. Le vieux rating global unique a été migré vers ce modèle par thème, et `getAptitude(theme)` est maintenant **dérivé** du rating du thème au lieu d'être persisté séparément. Les échecs entrent dans une queue de renforcement **player-owned** et n'appartiennent pas au coach : changer de coach ne réinitialise ni les ratings de thème, ni les puzzles vus, ni les bonus préparés, ni les puzzles à réviser.
 
 Deux types de bonus coexistent :
 
-- **Training bonuses** — hors partie. L'auto-entraînement est gratuit dès le jour 1. Une session réussie donne **1 charge** d'un bonus du thème entraîné. Quand le joueur l'invoque en partie, le thème est **connu**.
-- **Flow bonuses** — en partie. Chaque entrée en Flow (palier 1+) donne **1 charge** de bonus Flow, une seule par entrée en Flow. Quand le joueur l'invoque, un puzzle **inédit** est tiré, le thème reste **caché** jusqu'à la résolution, et la consommation n'interrompt pas le Flow.
+- **Training bonuses** — hors partie. La Training Hub (E.5) permet soit de s'entraîner avec le coach sur ses `primaryThemes`, soit de faire du self-training sur les 22 thèmes. Une session suit une structure verrouillée : **3 solves d'affilée**, ou **6 solves totaux en 18 tentatives max**, sinon échec. Une réussite prépare **un bonus de thème** pour le **prochain tournoi uniquement**. Ce bonus est **utilisable une fois par partie** pendant ce tournoi, puis tous les bonus d'entraînement sont effacés à la finalisation du tournoi.
+- **Flow bonuses** — en partie. Chaque **montée de palier** Flow (`I`, `II`, `III`, `MAX`) peut donner **1 charge** si le slot Flow est vide ; la charge n'est jamais cumulable au-delà de `1`. Quand le joueur l'invoque, un puzzle **inédit** est tiré, le thème reste **caché** jusqu'à la résolution, et la consommation n'interrompt pas le Flow. Si le joueur sort du Flow sans l'avoir utilisé, la charge non dépensée est **perdue**.
 
-Quand un bonus (training ou Flow) est invoqué, la vraie partie est **suspendue** sans toucher `chess-engine.js`, le plateau passe en **puzzle mode** sur une instance temporaire, le joueur a **une seule tentative** et temps illimité. Succès : retour à la vraie partie puis playback automatique de Stockfish sur les **X prochains demi-coups / coups récompensés**. Échec : retour à la partie sans récompense. Le bonus est consommé dans tous les cas. Pendant le playback, les clics sont désactivés, le Focus est **pausé** (aucun gain, aucune perte, aucun progrès de Flow), et le contrôle revient au joueur à la fin.
+Quand un bonus (training ou Flow) est invoqué, la vraie partie est **suspendue** sans toucher `chess-engine.js`, le plateau passe en **puzzle mode** sur une instance temporaire, le joueur a **une seule tentative** et temps illimité. Le reward est désormais modulé par **Blitz Decay** : une barre-fusible verticale sur la droite de l'échiquier se vide en continu pendant le puzzle, et le tier atteint au moment du **dernier coup correct** fixe la base de récompense. Succès : retour à la vraie partie puis playback automatique de Stockfish sur les **X prochains demi-coups / coups récompensés**. Échec : retour à la partie sans récompense. Le bonus est consommé dans tous les cas. Pendant le playback, les clics sont désactivés, le Focus est **pausé** (aucun gain, aucune perte, aucun progrès de Flow), et le contrôle revient au joueur à la fin.
+
+Les sessions de la **Training Hub** n'utilisent **pas** Blitz Decay : elles sont sans pression temporelle, sur le même échiquier puzzle, avec une UI de progression (`streak`, `solved`, `attempts remaining`). Chaque session consomme **1 jour de calendrier** via `CalendarSystem.advanceOneDay()`, ce qui crée une vraie tension entre préparation et calendrier des tournois. Les updates de rating de thème utilisent une constante `TRAINING_K_FACTOR_MULT = 0.25`, donc la progression en salle d'entraînement est volontairement plus lente que la progression acquise sous pression en partie.
 
 Le nombre de moves Stockfish accordés suit cette base :
 
-- base `2`
-- bonus coach via `getCoachMoveBonus(currentCoach.skills[theme])`
-- bonus aptitude du joueur sur le thème (`+1` si aptitude > 50, `+2` si aptitude > 80)
+- base **Blitz Decay** :
+  - fast tier → `3`
+  - medium tier → `2`
+  - slow tier → `1`
+- bonus coach via `StaffSystem.getCurrentCoachBonusMoves(theme)`
+- bonus aptitude dérivé du rating du thème (`+1` si aptitude > 50, `+2` si aptitude > 80)
 - bonus de profil de départ si le thème correspond au style choisi à la création du personnage
 
 **Aucun seuil d'invocation** : le joueur peut dépenser un bonus à n'importe quel moment de son tour, y compris très tôt dans l'ouverture. Le design assume l'auto-régulation plutôt qu'une règle paternaliste du type "pas avant le 10e coup".
@@ -207,7 +213,8 @@ Le nombre de moves Stockfish accordés suit cette base :
 - **E.1** — fondation puzzle : `puzzle-data.js`, `puzzle-system.js`, auto-entraînement standalone, aptitudes, puzzles vus, renforcement, tests
 - **E.2** — bonus d'entraînement en partie : inventory training, invocation, suspension de partie, puzzle mode, playback Stockfish, tests
 - **E.3** — coach + finance : `coach-data.js`, `staff-system.js`, UI coach, coût hebdomadaire, qualité coach sur entraînement et bonus
-- **E.4** — intégration Flow : génération du bonus Flow à l'entrée en palier 1+, thème caché, reveal card, consommation sans casser le Flow
+- **E.4 ✅ (2026-04-12)** — intégration Flow + Blitz Decay : génération d'un bonus Flow à **chaque montée de palier** tant que le slot est vide, perte du bonus non dépensé à la sortie de Flow, `pickFlowPuzzle()` inédit avec filtre de couleur joueur si possible, thème caché puis reveal card en 2 phases, barre-fusible verticale à droite de l'échiquier, et reward unifié `tier base (3/2/1) + coach + aptitude`
+- **E.5 ✅ (2026-04-12)** — Training Hub : simplification du modèle coach (`primaryThemes[]` + `bonusMoves`), ratings puzzle **par thème**, sessions coach/self-training sur l'échiquier avec règles `3-streak / 6 solves / 18 attempts`, consommation de `1` jour de calendrier par session, et bonus d'entraînement désormais **préparés pour le prochain tournoi** puis vidés à la finalisation
 
 **Phase F — Rivaux et narration**
 `rival-system.js` : 5 à 10 PNJ nommés avec une courbe Elo qui progresse en parallèle. Ils apparaissent dans les tournois, commentent les résultats via l'inbox, créent des rivalités émergentes. Extension des templates de mail pour les messages de rivaux.
@@ -234,6 +241,48 @@ Exemples : variables `playerName` pas `nomJoueur`, fichier `tournament-data.js` 
 - **Si les joueurs le demandent : étendre le skip à `simulate rest of tournament`** sans remettre en cause la version actuelle par round, qui est le plus petit point d'entrée utile pour le test et le pacing.
 
 - **Transitions musique / ambiance entre mode partie et mode puzzle** : différées à la Phase H polish. Phase E se contente de la signalétique visuelle et des hooks sonores minimaux, sans système de transition audio dédié.
+
+- **Puzzle mode sound and animation polish** *(noted E.4, 2026-04-12)* :
+  la Phase E a livré le puzzle-under-pressure avec une signalétique
+  fonctionnelle (barre-fusible, reveal cards, transformation visuelle
+  du plateau) mais sans sound design dédié. La Phase H pourra ajouter
+  un son d'activation du puzzle mode, un ticking lié à la fuse bar
+  avec accélération en jaune/rouge, un "ding" sur chaque bon coup
+  intermédiaire, un succès distinct du jingle de victoire, un son de
+  défaite, un effet de lecture mécanique pendant la séquence
+  Stockfish, ainsi qu'une transition musicale vers une piste plus
+  tendue avant retour au thème normal. Aucun changement
+  d'architecture requis : les hooks existent déjà côté `BonusSystem`.
+
+- **Bouton Resign + abandon probabiliste de l'IA** *(Phase G/H)* :
+  le joueur pourra abandonner via un bouton dédié avec modal de
+  confirmation, compté comme une défaite complète pour l'Elo. L'IA
+  pourra aussi abandonner de façon probabiliste dans les positions
+  durablement perdues (ordre de grandeur retenu : 30% à `-600cp`,
+  60% à `-800cp`, 90% à `-1000cp`, après `5+` demi-coups consécutifs
+  dans cette zone), sans rendre l'abandon automatique.
+
+- **Offres de nulle** *(Phase G/H)* :
+  le joueur pourra proposer une nulle via un bouton dédié, l'IA
+  répondant selon l'évaluation, l'écart d'Elo et le contexte de
+  tournoi. L'IA pourra aussi proposer une nulle au joueur via un
+  modal accepter/refuser. `chess.js` couvre déjà les bases règles
+  (répétition triple / règle des 50 coups) via `in_threefold_repetition()`
+  et `in_draw()`.
+
+- **Révision du mécanisme d'invocation des puzzles** :
+  la version actuelle est désormais **Blitz Decay** :
+  `1 puzzle = succès/échec binaire`, mais la **vitesse de résolution**
+  module la base de reward (`fast/medium/slow`). Des variantes plus
+  granulaires restent envisageables plus tard (par exemple plusieurs
+  puzzles résolus → plus de coups Stockfish), tant que le rythme de
+  partie reste fluide.
+
+- **Hard cutoff Focus dans les positions désespérées** *(shipped, 2026-04-12)* :
+  plus aucune interaction Focus/Flow quand le joueur est à `<= -800cp`
+  avec `<= 10` pièces, ou à `<= -1500cp` quel que soit le matériel.
+  But : empêcher le farming de Focus en jouant des coups évidents dans
+  une partie objectivement perdue.
 
 - **Niveaux de difficulté global avec scaling dynamique (easy / normal / realistic)** *(décidé en C.4, 2026-04-10)*
 
@@ -379,12 +428,13 @@ est mûr pour être traité.
   par un bitset ou un tableau indexé plus compact pour protéger la taille
   du save localStorage.
 
-- **`getCoachMoveBonus(skill)` comme point de tuning unique** *(décidé avant E.1, 2026-04-11)*
-  Le mapping verrouillé de Phase E (`0..20 => 0`, `21..50 => 1`,
-  `51..80 => 2`, `81..100 => 3`) doit rester encapsulé dans un helper
-  unique. **Refactor déclencheur** : si les playtests montrent des effets
-  de seuil trop abrupts, ajuster cette seule fonction (linéaire, seuils
-  adoucis, etc.) sans modifier les call sites ni la logique de bonus.
+- **Bonus coach par tier comme point de tuning unique** *(mis à jour E.5, 2026-04-12)*
+  En E.5, l'effet coach n'est plus une grille `skills[theme]`, mais un
+  `bonusMoves` explicite porté par chaque coach (`+1 / +2 / +3`) et lu
+  via `StaffSystem.getCurrentCoachBonusMoves(theme)`. **Refactor
+  déclencheur** : si les playtests montrent que les starters/mid/elite
+  se ressemblent trop ou trop peu, ajuster ces paliers ou la couverture
+  de `primaryThemes[]` sans réintroduire une grille de 22 skills.
 
 ## Comment tu dois travailler avec moi
 

@@ -277,7 +277,129 @@ Target: **17-22 tests**.
 - async race conditions between the playback loop and Maia’s existing think/move path
 - puzzle UX clarity: the board must feel unmistakably “not the real game” while still reusing the same renderer
 
-## 5. Open questions parked for later sub-phases
+## 5. E.3 design
+
+**Q1 — Weekly cost deduction.** I pick **A**: `CalendarSystem` gets a tiny recurring tick API, `onDayAdvanced(handler) -> unsubscribe`, and `continue()` calls all registered handlers after each date increment and before event resolution. `StaffSystem.init()` subscribes once and runs `processWeeklyCost(currentDate)`, checking `compareDates(addDays(lastPaidDate, 7), currentDate) <= 0`. If the player cannot afford the weekly cost, the coach is **auto-fired** immediately, `coach_fired { reason: 'cant_afford' }` is emitted, and Inbox explains why; no debt and no blocked calendar.
+
+**Q2 — Coach catalog.** Ten coaches ship, Elo-gated, with visible archetypes: 2 starters at `800`, 3 mid specialists at `1200-1400`, 3 mid balanced at `1300-1400`, 1 elite balanced at `1800`, 1 elite specialist at `2000`. Locked entries remain unchanged for Meyer, Petrova, and Rinaldi. Full catalog:
+
+```js
+[
+{id:'coach_meyer_luc',name:'Luc Meyer',nationality:'FR',title:'CM',weeklyCost:30,eloUnlock:800,style:'patient',background:'Runs a community chess club and works well with beginners.',skills:{fork:35,pin:30,skewer:22,discoveredAttack:20,hangingPiece:38,sacrifice:18,trappedPiece:28,attackingF2F7:32,mateIn1:40,mateIn2:34,backRankMate:36,opening:30,middlegame:28,endgame:24,deflection:18,attraction:20,ruyLopez:26,sicilianDefense:22,frenchDefense:24,caroKannDefense:25,italianGame:34,queensPawnGame:27}},
+{id:'coach_silva_ines',name:'Ines Silva',nationality:'PT',title:'WCM',weeklyCost:40,eloUnlock:800,style:'calm',background:'Lisbon scholastic coach focused on pattern repetition and confidence building.',skills:{fork:32,pin:34,skewer:24,discoveredAttack:22,hangingPiece:40,sacrifice:20,trappedPiece:30,attackingF2F7:36,mateIn1:42,mateIn2:38,backRankMate:39,opening:31,middlegame:30,endgame:26,deflection:19,attraction:21,ruyLopez:35,sicilianDefense:23,frenchDefense:25,caroKannDefense:28,italianGame:37,queensPawnGame:29}},
+{id:'coach_kowalski_marek',name:'Marek Kowalski',nationality:'PL',title:'FM',weeklyCost:110,eloUnlock:1200,style:'sharp',background:'Aggressive open specialist who teaches forcing lines and tactical conversion.',skills:{fork:88,pin:42,skewer:38,discoveredAttack:84,hangingPiece:55,sacrifice:90,trappedPiece:35,attackingF2F7:82,mateIn1:68,mateIn2:80,backRankMate:52,opening:58,middlegame:66,endgame:28,deflection:74,attraction:78,ruyLopez:36,sicilianDefense:85,frenchDefense:30,caroKannDefense:24,italianGame:72,queensPawnGame:28}},
+{id:'coach_haddad_nadia',name:'Nadia Haddad',nationality:'DZ',title:'WFM',weeklyCost:120,eloUnlock:1250,style:'methodical',background:'Known for clean tactical teaching and relentless motif drilling.',skills:{fork:45,pin:86,skewer:83,discoveredAttack:40,hangingPiece:50,sacrifice:34,trappedPiece:58,attackingF2F7:30,mateIn1:62,mateIn2:67,backRankMate:64,opening:42,middlegame:60,endgame:32,deflection:76,attraction:72,ruyLopez:26,sicilianDefense:34,frenchDefense:41,caroKannDefense:39,italianGame:31,queensPawnGame:36}},
+{id:'coach_petrova_elena',name:'Elena Petrova',nationality:'RU',title:'IM',weeklyCost:150,eloUnlock:1300,style:'strict',background:'Former Moscow junior champion, now coaching ambitious improvers.',skills:{fork:60,pin:55,skewer:45,discoveredAttack:30,hangingPiece:70,sacrifice:25,trappedPiece:40,attackingF2F7:50,mateIn1:80,mateIn2:65,backRankMate:75,opening:85,middlegame:50,endgame:20,deflection:35,attraction:30,ruyLopez:90,sicilianDefense:70,frenchDefense:60,caroKannDefense:55,italianGame:65,queensPawnGame:40}},
+{id:'coach_larsen_sofie',name:'Sofie Larsen',nationality:'DK',title:'IM',weeklyCost:145,eloUnlock:1300,style:'balanced',background:'Copenhagen trainer with a reputation for practical, all-phase preparation.',skills:{fork:58,pin:60,skewer:57,discoveredAttack:55,hangingPiece:63,sacrifice:54,trappedPiece:56,attackingF2F7:52,mateIn1:61,mateIn2:64,backRankMate:62,opening:66,middlegame:68,endgame:60,deflection:58,attraction:57,ruyLopez:65,sicilianDefense:61,frenchDefense:59,caroKannDefense:63,italianGame:67,queensPawnGame:64}},
+{id:'coach_popescu_andrei',name:'Andrei Popescu',nationality:'RO',title:'FM',weeklyCost:135,eloUnlock:1300,style:'pragmatic',background:'Open-circuit coach who emphasizes practical decision-making over memorization.',skills:{fork:54,pin:56,skewer:53,discoveredAttack:58,hangingPiece:61,sacrifice:52,trappedPiece:55,attackingF2F7:50,mateIn1:59,mateIn2:60,backRankMate:58,opening:62,middlegame:65,endgame:63,deflection:57,attraction:55,ruyLopez:58,sicilianDefense:60,frenchDefense:61,caroKannDefense:64,italianGame:59,queensPawnGame:66}},
+{id:'coach_nguyen_minh',name:'Minh Nguyen',nationality:'VN',title:'IM',weeklyCost:155,eloUnlock:1400,style:'technical',background:'Patient technician whose students improve fastest in endings and clean conversion.',skills:{fork:52,pin:54,skewer:51,discoveredAttack:50,hangingPiece:58,sacrifice:46,trappedPiece:53,attackingF2F7:44,mateIn1:57,mateIn2:59,backRankMate:61,opening:56,middlegame:62,endgame:72,deflection:55,attraction:52,ruyLopez:54,sicilianDefense:57,frenchDefense:63,caroKannDefense:68,italianGame:55,queensPawnGame:70}},
+{id:'coach_fischer_anna',name:'Anna Fischer',nationality:'DE',title:'GM',weeklyCost:390,eloUnlock:1800,style:'precise',background:'Elite Bundesliga veteran offering broad, polished preparation across all phases.',skills:{fork:72,pin:75,skewer:73,discoveredAttack:74,hangingPiece:78,sacrifice:70,trappedPiece:71,attackingF2F7:69,mateIn1:76,mateIn2:79,backRankMate:77,opening:82,middlegame:81,endgame:78,deflection:74,attraction:73,ruyLopez:80,sicilianDefense:79,frenchDefense:76,caroKannDefense:78,italianGame:81,queensPawnGame:80}},
+{id:'coach_rinaldi_marco',name:'Marco Rinaldi',nationality:'IT',title:'GM',weeklyCost:520,eloUnlock:2000,style:'demanding',background:'Ex-second in elite opens, feared for tactical prep and sharp opening files.',skills:{fork:88,pin:82,skewer:76,discoveredAttack:92,hangingPiece:70,sacrifice:95,trappedPiece:68,attackingF2F7:84,mateIn1:78,mateIn2:86,backRankMate:72,opening:90,middlegame:83,endgame:48,deflection:91,attraction:89,ruyLopez:62,sicilianDefense:96,frenchDefense:58,caroKannDefense:44,italianGame:80,queensPawnGame:50}}
+]
+```
+
+**Q3 — Coach UI screen.** `UICareer.coaches` should own a dedicated `#screen-coaches` with: `render()`, `renderCurrentCoach()`, `renderBrowser()`, `renderDetail(coachId)`, `onSelectCoach(coachId)`, `onHireCoach(coachId)`, `onFireCoach()`, and `onBack()`. Home gets one primary button: `👨‍🏫 Hire a coach` when empty, `👨‍🏫 Your coach` plus the current name when filled. The screen layout is locked: current-coach panel on top, card grid in the middle, details pane below, grouped bars for `Motifs / Mates / Phases / Openings`, and a replace-confirm modal when switching.
+
+**Q4 — Reward wire.** I agree with **A**: `getCoachMoveBonus(skill)` belongs in `staff-system.js`. `BonusSystem.getRewardMoveCount(theme)` stays focused on reward composition and simply asks `StaffSystem.getCurrentCoach()` plus `StaffSystem.getCoachMoveBonus(coach.skills[theme] || 0)`. That keeps coach-tier tuning in one place and avoids bonus code becoming the owner of staff semantics.
+
+**Q5 — Events and inbox.** Add `coach_hired { coachId, weeklyCost, eloUnlock }` and `coach_fired { coachId, reason: 'manual'|'cant_afford' }`, nothing more for E.3. Inbox consumes both via three templates: `inbox_coach_hired`, `inbox_coach_fired_manual`, and `inbox_coach_fired_no_funds`. I would not add a separate “weekly payment made” mail; that is bookkeeping noise, not narrative value.
+
+**Q6 — `StaffSystem` API.** Public surface: `init()`, `getCurrentCoach()`, `getHireDate()`, `getLastPaidDate()`, `getAllCoaches()`, `getAvailableCoaches()`, `getCoachById(id)`, `canHire(coachId)`, `hire(coachId)`, `fire(reason = 'manual')`, `processWeeklyCost(currentDate)`, `getCoachMoveBonus(skill)`. Persist `staff.currentCoach` as `{ id, hireDate, lastPaidDate }`. Hire deducts the first week immediately, sets both dates to today, and replacing is internally `fire('manual')` + `hire(newId)` wrapped as one operation.
+
+**Q7 — Tests.** `tests/staff-system.test.js` should target 17-18 tests: init/getters; hire success; Elo gate block; insufficient-funds block; fire clears slot; replace flow; first-week deduction on hire; weekly deduction after 7 days only; no deduction before 7 days; auto-fire on insufficient funds; `getCoachMoveBonus` bands; `coach_hired` / `coach_fired` events; player-owned training state survives fire/replace; `getAvailableCoaches()` respects Elo unlock; current coach resolves to catalog entry; manual fire emits `reason:'manual'`; no-coach weekly processing is no-op.
+
+**Q8 — Implementation order.** I’d follow your proposed order almost exactly: `1.` `coach-data.js`; `2.` `staff-system.js`; `3.` `tests/staff-system.test.js`; `4.` `calendar-system.js` day-tick hook plus tests; `5.` `inbox-templates.js` add the 3 coach templates; `6.` `inbox-system.js` subscribe to coach events; `7.` `bonus-system.js` reward wire; `8.` `index.html` + CSS for `#screen-coaches`; `9.` `ui-career.js` coaches namespace and navigation; `10.` home button + current coach status; `11.` run all 8 suites, update changelog, stop. Top risks: double-charging weekly costs on reload if `lastPaidDate` logic is sloppy, UI clutter in the 22-skill detail pane, and accidental cross-domain leakage if `BonusSystem` or `UICareer` start mutating `staff` directly instead of going through `StaffSystem`.
+
+## 6. E.4 design
+
+**A1 — Blitz Decay ownership.** The Blitz Decay timer should live entirely in `BonusSystem`, because it already owns puzzle-mode runtime state, resolution timing, and the post-puzzle reward path. E.4 adds `_puzzleStartTime`, `_puzzleDrainMs`, `_puzzleTier`, and `_fuseRafId`; the fuse bar is driven by `requestAnimationFrame`, reading `elapsed = now - _puzzleStartTime`, computing `fill = max(0, 1 - elapsed / _puzzleDrainMs)`, and updating a dedicated vertical DOM fill element on the right side of the board. This keeps timer truth in one place and avoids leaking puzzle-mode timing into `UIManager`.
+
+**Blitz Decay formula and thresholds.** I propose named constants at the top of `bonus-system.js`: `BLITZ_DRAIN_BASE_MS = 27000`, `BLITZ_DRAIN_EXPONENT = 1.25`, `BLITZ_FAST_CUTOFF = 2 / 3`, and `BLITZ_MEDIUM_CUTOFF = 1 / 3`. Total drain time becomes `totalDrainMs(solutionLength) = round(BLITZ_DRAIN_BASE_MS * solutionLength ** BLITZ_DRAIN_EXPONENT)`, where `solutionLength` means the number of **player decisions** in the line (not the full alternating ply count from the stored Lichess solution array). Because the bar drains continuously from full to empty, tier is derived from remaining fill on the **last correct move**: `> 0.66 => fast (3 base)`, `> 0.33 => medium (2 base)`, else slow (1 base). Concrete cutoffs by elapsed solve time: length 1 = total `27.0s`, fast `< 9.0s`, medium `< 18.0s`; length 2 = `64.2s`, fast `< 21.4s`, medium `< 42.8s`; length 3 = `106.8s`, fast `< 35.6s`, medium `< 71.2s`; length 4 = `152.7s`, fast `< 50.9s`, medium `< 101.8s`; length 5 = `201.1s`, fast `< 67.0s`, medium `< 134.1s`, then slow forever once the bar is empty. This is superlinear enough to reward real calculation on longer lines without making the slow tier punitive.
+
+**Fuse-bar visual spec.** E.4 uses the locked vertical layout: the banner stays above the board for text, while the fuse bar is a separate visual strip on the **right side of the board**, aligned to board height, about `12-14px` wide. The fill grows bottom-to-top when full and drains downward toward empty as time passes, using a smooth gradient from red at the bottom through yellow to green at the top of the filled portion. At zero, the fill is empty and the bar remains as a thin red outline. Hidden when not in puzzle mode, never overlaps the board, and never resets on intermediate correct moves.
+
+**A2 — Flow-bonus earn hook.** I prefer an event, not a direct call. `FocusSystem` becomes a producer for the first time by emitting a dedicated `flow_bonus_earned { flowPalier }` event the moment it crosses from `flowPalier === 0` to `>= 1`, and only if `training.flowBonus.earned` is not already true. That keeps `FocusSystem` ignorant of `BonusSystem`, preserves the bus pattern introduced in D.0, and gives the UI a clean reactive hook for button refreshes or future polish. The flag itself still persists in `CareerManager.training.flowBonus`, and there is one locked extra rule: **if Flow exits before the bonus is spent, the unspent Flow bonus is lost immediately** and the sidebar button disappears.
+
+**A3 — Flow puzzle selection.** Add `PuzzleSystem.pickFlowPuzzle() -> puzzle | null`. It ignores reinforcement queues, ignores player color, and picks from the full unseen pool across all 22 themes; if every puzzle is seen, it returns `null` and the invocation is blocked cleanly rather than reusing old content. When a puzzle is chosen, it is marked seen immediately and may also persist its `id` in `training.flowBonus.reservedPuzzleId` so the selected unseen puzzle survives reload mid-game. This should be a dedicated method rather than a flaggy variant of `pickInGamePuzzle(theme)`, because its invariants are meaningfully different.
+
+**A4 — Flow UI and reveal card.** The sidebar gets a second button below the training button: `Flow bonus (1)`, visible only when `training.flowBonus.earned === true` and hidden again on consumption or Flow exit. Invoking it does **not** break Flow. During the puzzle, the theme is hidden; the banner reads `PUZZLE — Unknown theme — Solve`. On resolution, Flow uses a two-phase non-modal overlay: phase 1 for `500ms` shows `Theme revealed: FORK`, then phase 2 for `1500ms` shows `Result: Success`, `Tier: Fast`, `Base: 3`, `Coach: +2`, `Aptitude: +1`, `Total: 6 Stockfish moves`, and `Puzzle rating: 1180`. Training bonuses use the same Blitz Decay math too, but keep a simpler single-phase outcome card because the theme was already known.
+
+**A5 — Reward computation with Blitz Decay.** `BonusSystem.getRewardMoveCount(theme, tierBaseMoves)` should become the single reward combiner for both sources: base from Blitz tier (`3/2/1`) plus aptitude bonus plus coach quality bonus. Nothing else changes from E.3: `StaffSystem.getCoachMoveBonus(coach.skills[theme] || 0)` remains the source of coach contribution, and Flow bonuses use the **revealed** theme to look that skill up after the puzzle resolves. Failure still yields `0` regardless of time or coach.
+
+**A6 — Events, tests, and implementation order.** Add one new event: `flow_bonus_earned { flowPalier }`. Reusing `bonus_added` would be less explicit and buys us little, since Flow earning is a distinct state transition with likely UI consumers. Test additions should target `15-20` new cases across existing suites: in `bonus-system.test.js`, fast/medium/slow tier reward, failure ignoring speed, drain scaling by solution length, Flow invocation selecting unseen random-theme puzzles, hidden-theme reveal card, Flow coach bonus applied from the revealed theme, and Flow bonus cleared on consume/exit; in `puzzle-system.test.js`, `pickFlowPuzzle()` returning unseen puzzles and `null` when exhausted. Implementation order: `1.` add Blitz Decay timer math + banner CSS/UI hooks, `2.` add `PuzzleSystem.pickFlowPuzzle()`, `3.` add `FocusSystem -> flow_bonus_earned`, `4.` add Flow invocation + hidden-theme runtime state in `BonusSystem`, `5.` wire sidebar button, `6.` add two-phase Flow reveal card, `7.` tests, `8.` changelog + mark E.4 done in `CLAUDE.md`, `9.` stop. Top risks: timer/UI drift if the fuse bar and resolution tier disagree by a frame, Flow bonus persistence bugs across enter/exit/reload edges, and overlong outcome-card timing slowing the game if the two-phase reveal is not kept crisp.
+
+## 7. E.5 Training Hub design
+
+**Q1 — Coach theme assignment.** With the simplified coach model, I would reassign the 10 coaches as follows, using explicit `primaryThemes[]` and `bonusMoves` instead of the old 22-skill matrix. This covers every motif and mate theme at least once, gives the major openings to mid/elite coaches, and leaves a few niche themes as self-training-first content.  
+
+| Coach | Tier | Cost | Bonus | Primary themes |
+|---|---:|---:|---:|---|
+| Luc Meyer | Starter | 30 | +1 | `fork` |
+| Ines Silva | Starter | 40 | +1 | `mateIn1` |
+| Marek Kowalski | Mid | 110 | +2 | `sacrifice`, `sicilianDefense` |
+| Nadia Haddad | Mid | 120 | +2 | `pin`, `skewer` |
+| Elena Petrova | Mid | 150 | +2 | `ruyLopez`, `backRankMate` |
+| Sofie Larsen | Mid | 145 | +2 | `italianGame`, `mateIn2` |
+| Andrei Popescu | Mid | 135 | +2 | `hangingPiece`, `trappedPiece` |
+| Minh Nguyen | Mid | 155 | +2 | `discoveredAttack`, `attackingF2F7` |
+| Anna Fischer | Elite | 390 | +3 | `opening`, `middlegame`, `endgame`, `deflection` |
+| Marco Rinaldi | Elite | 520 | +3 | `attraction`, `fork`, `sacrifice`, `sicilianDefense` |
+
+This leaves `frenchDefense`, `caroKannDefense`, and `queensPawnGame` as perfectly valid self-training-only themes in E.5, which fits the “some themes are yours to master alone” goal.
+
+**Q2 — Session numbers.** I would keep the locked `3 / 6 / 18` structure. It creates two distinct success fantasies without being fiddly: strong players can spike a 3-streak quickly, while weaker players still have a persistence path that feels earned rather than random. The only tuning I would watch in playtest is emotional pacing, not the math; on paper the numbers are good because `6/18` implies a very reachable 33% success rate while still making failure possible enough to create calendar tension.
+
+**Q3 — Calendar integration.** I agree with **B**: no scheduled event, no extra phase choreography, just consume one calendar day at session end through a direct `CalendarSystem` advance helper or a tiny dedicated `advanceOneDay()` path. `in_training` only earns its complexity if training is deferred or asynchronous; here the player is actively doing the session now, so using a whole event lifecycle would be ceremony without value. The only discipline point is to ensure the one-day advance still fires the existing day-tick hook so coach costs and future recurring systems remain consistent.
+
+**Q4 — Per-theme rating migration.** Your migration is the right one. On `PuzzleSystem.init()`, if legacy `training.puzzleRating` / `training.puzzleRatingRd` exist, seed every missing `training.puzzleRatings[theme]` and `training.puzzleRatingRds[theme]` from those globals, then delete the global fields from normalized state before save. I would also simplify aptitude by deriving it from rating instead of maintaining a second progression number: `getAptitude(theme)` can become a pure read helper over `puzzleRatings[theme]`, for example `Math.max(0, Math.min(100, Math.round((rating - 500) / 7)))`, so existing reward hooks keep their API while the real source of truth becomes the per-theme rating.
+
+**Q5 — Tournament-scoped bonus schema.** I’d replace raw counts with explicit preparation state:
+
+```js
+training: {
+  puzzleRatings: { [theme]: number },
+  puzzleRatingRds: { [theme]: number },
+  seenPuzzleIds: { [puzzleId]: 1 },
+  reinforcementQueues: { [theme]: Array<{ puzzleId, state, confirmations }> },
+  trainingBonuses: {
+    [theme]: {
+      prepared: boolean,
+      usedThisGame: boolean,
+      lockedUntilTournamentEnd: boolean
+    }
+  },
+  flowBonus: { earned: boolean, reservedPuzzleId: string | null },
+  stats: { ... }
+}
+```
+
+`prepared` means eligible for the next tournament window, `usedThisGame` resets at the start of each new tournament game, and `lockedUntilTournamentEnd` prevents re-training the same theme after success. `TournamentSystem.finalize()` then clears the entire `trainingBonuses` object.
+
+**Q6 — Coach bonus API.** I agree with replacing `getCoachMoveBonus(skill)` entirely. The new API should be `StaffSystem.getCurrentCoachBonusMoves(theme) -> number`, not parameterless, because a coach only grants their tier bonus on themes inside `primaryThemes`; off-theme it must return `0`. That keeps the call site obvious in `BonusSystem.getRewardMoveCount(theme, tierBaseMoves)` and prevents accidental “coach grants +2 on everything” bugs.
+
+**Q7 — Coach screen simplification.** Confirmed. The current detail pane should be deleted and the screen reduced to a clear card-grid browser: name, flag, title, weekly cost, Elo unlock, `Themes: ...`, `Bonus: +N Stockfish moves`, short background, and `Hire / Replace / Locked`. I would keep a lightweight selected-card emphasis only for readability, not a separate analytics pane; the whole point of this redesign is to make coaches legible in five seconds.
+
+**Q8 — Self-training flow.** I agree with **A**: self-training belongs in the training hub, not the coach browser. The hub should have two top panels: `With your coach` when hired, listing only that coach’s `primaryThemes`, and `Self-training`, always available, listing all 22 themes. That makes the player’s decision immediately legible: “Do I drill the coach’s specialty for a stronger tournament bonus, or branch out on my own with no coach boost?”
+
+**Q9 — Flow bonus impact.** Confirmed. Flow bonuses should use the **theme-specific** rating for whatever hidden theme was randomly rolled. That is exactly the right emergent behavior: a player who is tactically strong in forks but weak in pins should get an easier pin Flow puzzle than fork puzzle, because the system is modeling actual themed familiarity rather than one global puzzle skill.
+
+**Q10 — Old 22-skill code.** I agree with **A: delete it all now**. `coach-data.js` should lose the `skills` object entirely, `staff-system.js` should drop `getCoachMoveBonus(skill)`, and `BonusSystem` should stop reading `coach.skills[theme]`. Keeping it dormant would make the new simpler model look provisional, and this redesign is not provisional; it is a deliberate simplification to get a stronger core loop.
+
+**Q11 — Tests and implementation order.** Strict order:
+`1.` update `coach-data.js` to `primaryThemes` + `bonusMoves`;  
+`2.` refactor `staff-system.js` APIs and `tests/staff-system.test.js`;  
+`3.` migrate `career-manager.js` schema to per-theme ratings and tournament-scoped bonuses;  
+`4.` refactor `puzzle-system.js` for per-theme ratings, `TRAINING_K_FACTOR_MULT = 0.25`, session paths `3 / 6 / 18`, and new bonus semantics;  
+`5.` update `tests/puzzle-system.test.js`;  
+`6.` wire `bonus-system.js` to the new `StaffSystem.getCurrentCoachBonusMoves(theme)` and per-game bonus reset/clear hooks;  
+`7.` add the training hub screen in `index.html`, `career.css`, and `ui-career.js`;  
+`8.` hook one-day training cost into calendar progression and tournament-finalize cleanup;  
+`9.` run all suites, update `CLAUDE.md` / `CHANGELOG.md`, stop.  
+Expected test impact: `staff-system` roughly flat at `18-22`, `puzzle-system` grows by `12-18`, `bonus-system` changes by `4-6`, and one or two `tournament-system` tests should be added for per-game reset and tournament-end clearing.
+
+**Top 3 risks.** First, bonus-state migration is the sharpest edge: changing from “counts” to “prepared per theme, once per game” can silently break old invocation assumptions if every caller is not updated together. Second, deleting the 22-skill coach model will touch both UI and reward plumbing, so there is a real risk of half-migrated dead references unless the refactor is done in the strict order above. Third, calendar tension can feel punitive if the training hub is too many clicks for a one-day action, so the UI must make “start theme session, finish, consume a day, back to home” feel fast and intentional.
+
+## 8. Open questions parked for later sub-phases
 
 - Exact training session length (`X puzzles per session`) can be tuned after E.1 playtests.
 - Real board-based puzzle move validation belongs to the later training UI pass.
@@ -285,6 +407,6 @@ Target: **17-22 tests**.
 - Coach-driven aptitude acceleration belongs to E.3 once `staff-system.js` exists.
 - Flow-bonus reservation and hidden-theme reveal belong to E.4 only.
 
-## 6. Risks
+## 9. Risks
 
 The biggest E.1 risk is overscoping the session model and accidentally building half of E.2. Keep `puzzle-system.js` pure and boring: selection, persistence, reinforcement, aptitude, bonus count. The second risk is data sparsity per theme; if the starter pool is too small, seen-puzzle and reinforcement behavior will look broken, so even a "small" Phase E dataset needs enough per-theme headroom to exercise the rules honestly.
