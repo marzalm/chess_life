@@ -17,7 +17,7 @@ Chaque décision de design doit être jugée à l'aune de ces deux intentions : 
 - Le joueur crée son personnage (avatar pixel art en couches : visage, cheveux, yeux, peau, tenue) et choisit une nationalité et un genre.
 - Le jeu tourne autour d'un **calendrier annuel** et d'un bouton « Continuer » : on avance jour par jour, le jeu s'arrête à chaque événement (tournoi, séance d'entraînement, mail important, deadline d'inscription).
 - L'**inbox** est la colonne vertébrale narrative : articles de presse après les tournois, messages des coachs, provocations des rivaux, offres de sponsors, invitations à des tournois.
-- Entre les tournois, le joueur peut **s'inscrire à des événements**, **engager ou licencier des coachs**, **gérer ses finances**, et (plus tard) **s'entraîner** via des puzzles ou des drills d'ouverture.
+- Entre les tournois, le joueur peut **s'inscrire à des événements**, **engager ou licencier des coachs**, **gérer ses finances**, et **s'entraîner** via la Training Hub, les puzzles coachés, ou le mode `Solo practice`.
 - Les parties d'échecs se jouent sur l'échiquier existant, avec le système **Focus / Flow / Stockfish / Maia** déjà en place (la partie la plus aboutie du projet).
 - L'objectif long terme : grimper les tiers de tournois jusqu'à devenir Champion du Monde.
 
@@ -187,12 +187,12 @@ Les puzzles restent organisés autour de **22 thèmes verrouillés** :
 
 Deux types de bonus coexistent :
 
-- **Training bonuses** — hors partie. La Training Hub (E.5) permet soit de s'entraîner avec le coach sur ses `primaryThemes`, soit de faire du self-training sur les 22 thèmes. Une session suit une structure verrouillée : **3 solves d'affilée**, ou **6 solves totaux en 18 tentatives max**, sinon échec. Une réussite prépare **un bonus de thème** pour le **prochain tournoi uniquement**. Ce bonus est **utilisable une fois par partie** pendant ce tournoi, puis tous les bonus d'entraînement sont effacés à la finalisation du tournoi.
+- **Training bonuses** — hors partie. La Training Hub (E.5) permet de s'entraîner avec le coach sur ses `primaryThemes`. Ces sessions suivent une structure verrouillée : **3 solves d'affilée**, ou **6 solves totaux en 18 tentatives max**, sinon échec. Une réussite prépare **un bonus de thème** pour le **prochain tournoi uniquement**. Ce bonus est **utilisable une fois par partie** pendant ce tournoi, puis tous les bonus d'entraînement sont effacés à la finalisation du tournoi.
 - **Flow bonuses** — en partie. Chaque **montée de palier** Flow (`I`, `II`, `III`, `MAX`) peut donner **1 charge** si le slot Flow est vide ; la charge n'est jamais cumulable au-delà de `1`. Quand le joueur l'invoque, un puzzle **inédit** est tiré, le thème reste **caché** jusqu'à la résolution, et la consommation n'interrompt pas le Flow. Si le joueur sort du Flow sans l'avoir utilisé, la charge non dépensée est **perdue**.
 
 Quand un bonus (training ou Flow) est invoqué, la vraie partie est **suspendue** sans toucher `chess-engine.js`, le plateau passe en **puzzle mode** sur une instance temporaire, le joueur a **une seule tentative** et temps illimité. Le reward est désormais modulé par **Blitz Decay** : une barre-fusible verticale sur la droite de l'échiquier se vide en continu pendant le puzzle, et le tier atteint au moment du **dernier coup correct** fixe la base de récompense. Succès : retour à la vraie partie puis playback automatique de Stockfish sur les **X prochains demi-coups / coups récompensés**. Échec : retour à la partie sans récompense. Le bonus est consommé dans tous les cas. Pendant le playback, les clics sont désactivés, le Focus est **pausé** (aucun gain, aucune perte, aucun progrès de Flow), et le contrôle revient au joueur à la fin.
 
-Les sessions de la **Training Hub** n'utilisent **pas** Blitz Decay : elles sont sans pression temporelle, sur le même échiquier puzzle, avec une UI de progression (`streak`, `solved`, `attempts remaining`). Chaque session consomme **1 jour de calendrier** via `CalendarSystem.advanceOneDay()`, ce qui crée une vraie tension entre préparation et calendrier des tournois. Les updates de rating de thème utilisent une constante `TRAINING_K_FACTOR_MULT = 0.25`, donc la progression en salle d'entraînement est volontairement plus lente que la progression acquise sous pression en partie.
+Les sessions de la **Training Hub** n'utilisent **pas** Blitz Decay : elles sont sans pression temporelle, sur le même échiquier puzzle, avec une UI de progression (`streak`, `solved`, `attempts remaining`). Chaque session consomme **1 jour de calendrier** via `CalendarSystem.advanceOneDay()`, ce qui crée une vraie tension entre préparation et calendrier des tournois. Les updates de rating de thème utilisent une constante `TRAINING_K_FACTOR_MULT = 0.25`, donc la progression en salle d'entraînement est volontairement plus lente que la progression acquise sous pression en partie. En plus de ce mode coaché, la Training Hub propose désormais un **`Solo practice`** minimal : un seul bouton `🎲 Random puzzle`, sans bonus, sans coût en jours, sans changement de rating, sans `seenPuzzleIds`, sans reinforcement, purement pour le plaisir d'apprendre sur des positions fraîches.
 
 Le nombre de moves Stockfish accordés suit cette base :
 
@@ -214,10 +214,10 @@ Le nombre de moves Stockfish accordés suit cette base :
 - **E.2** — bonus d'entraînement en partie : inventory training, invocation, suspension de partie, puzzle mode, playback Stockfish, tests
 - **E.3** — coach + finance : `coach-data.js`, `staff-system.js`, UI coach, coût hebdomadaire, qualité coach sur entraînement et bonus
 - **E.4 ✅ (2026-04-12)** — intégration Flow + Blitz Decay : génération d'un bonus Flow à **chaque montée de palier** tant que le slot est vide, perte du bonus non dépensé à la sortie de Flow, `pickFlowPuzzle()` inédit avec filtre de couleur joueur si possible, thème caché puis reveal card en 2 phases, barre-fusible verticale à droite de l'échiquier, et reward unifié `tier base (3/2/1) + coach + aptitude`
-- **E.5 ✅ (2026-04-12)** — Training Hub : simplification du modèle coach (`primaryThemes[]` + `bonusMoves`), ratings puzzle **par thème**, sessions coach/self-training sur l'échiquier avec règles `3-streak / 6 solves / 18 attempts`, consommation de `1` jour de calendrier par session, et bonus d'entraînement désormais **préparés pour le prochain tournoi** puis vidés à la finalisation
+- **E.5 ✅ (2026-04-12)** — Training Hub : simplification du modèle coach (`primaryThemes[]` + `bonusMoves`), ratings puzzle **par thème**, sessions coachées sur l'échiquier avec règles `3-streak / 6 solves / 18 attempts`, consommation de `1` jour de calendrier par session, bonus d'entraînement désormais **préparés pour le prochain tournoi** puis vidés à la finalisation, plus un mode `Solo practice` à **zéro impact carrière** via un simple `🎲 Random puzzle`
 
-**Phase F — Rivaux et narration**
-`rival-system.js` : 5 à 10 PNJ nommés avec une courbe Elo qui progresse en parallèle. Ils apparaissent dans les tournois, commentent les résultats via l'inbox, créent des rivalités émergentes. Extension des templates de mail pour les messages de rivaux.
+**Phase F ✅ — Rivaux et narration** (terminée le 2026-04-15)
+`rival-data.js` (8 rivaux nommés, Elo 950–2200, archetypes rising/steady/declining/volatile) + `rival-system.js` (persistence, H2H, relation dérivée, drift offscreen hebdomadaire, co-registration 50%+10% heated avec mail de provocation à J-3). `TournamentSystem` injecte 1–3 rivaux par tournoi, émet `tournament_round_finished`, et applique un **soft pairing bias** au dernier round si joueur et rival met sont tous deux top-4 à ≤1 point d'écart. L'inbox est désormais accessible pendant les tournois (bouton dédié avec badge) et réagit via 3 templates : `round_press_player_result`, `rival_round_watch`, `rival_provocation_before_tournament`. Écran `🎭 Rivals` minimal avec portraits placeholder (initiales + hue hashée), Elo, H2H, relation, et tri Elo/proximité. 332 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
 
 **Phase G — Tiers 3 à 6 et cycle mondial**
 Ajout des tournois Tier 3 (opens internationaux), Tier 4 (fermés), Tier 5 (élite), Tier 6 (cycle Candidats → Championnat du Monde). Transition Maia → Stockfish pour les adversaires au-delà de 2000 Elo. Le joueur peut atteindre et gagner le Championnat du Monde.
@@ -228,7 +228,7 @@ Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pag
 **Mis de côté pour le moment (à réintroduire plus tard si besoin)** :
 - Système d'attributs joueur (ouvertures / tactique / finales / mental etc.) — on démarre avec Elo comme seule métrique de progression
 - Sponsors, cours donnés, revenus secondaires
-- Système d'entraînement avancé (puzzles, drills)
+- Drills d'ouverture avancés / plans d'entraînement plus riches que la Training Hub actuelle
 
 ## Langue du code et de l'UI
 

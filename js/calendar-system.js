@@ -450,6 +450,27 @@ const CalendarSystem = (() => {
     },
 
     /**
+     * Advance the calendar by `n` days without consuming queued events.
+     * Each day still fires the onDayAdvanced handlers (coach weekly cost,
+     * rival drift, provocation mails, …). Used by TournamentSystem.finalize
+     * to skip ahead by `daysDuration` while still running recurring work.
+     *
+     * @param {number} n  non-negative integer
+     * @returns {CalendarDate} the new date
+     */
+    advanceDaysSilently(n) {
+      const s = _state();
+      if (!Number.isFinite(n) || n < 0) return _cloneDate(s.date);
+      const steps = Math.floor(n);
+      for (let i = 0; i < steps; i++) {
+        s.date = _addOneDay(s.date);
+        _fireDayTickHandlers(s.date);
+      }
+      _persist();
+      return _cloneDate(s.date);
+    },
+
+    /**
      * Mark the current event as handled and return to idle.
      * Called after the player dismisses a non-interactive event
      * (e.g. a news mail that doesn't require further action).

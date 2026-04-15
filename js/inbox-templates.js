@@ -59,6 +59,34 @@ const InboxTemplates = {
       'Your coaching arrangement with {{coachName}} has ended because you could not cover the weekly cost of ${{weeklyCost}}.',
     tag: 'coach',
   },
+
+  // Phase F.3 — round press reaction. One template, branching on result
+  // inside the caller so we can vary the tone without three subjects.
+  round_press_player_result: {
+    from:    'Chess Life Wire',
+    subject: 'Round {{round}} — {{tournamentName}}',
+    body:
+      '{{playerName}} {{resultPhrase}} in round {{round}} of the {{tournamentName}}, facing {{opponentName}} ({{opponentElo}}). {{flavor}}',
+    tag:     'press',
+  },
+
+  // Round-by-round update on a met rival playing in the same tournament.
+  rival_round_watch: {
+    from:    'Tournament Wire',
+    subject: 'Round {{round}} — {{rivalName}} {{rivalVerb}}',
+    body:
+      'Your rival {{rivalName}} {{rivalVerb}} against {{opponentName}} in round {{round}} of the {{tournamentName}}. A result worth tracking.',
+    tag:     'press',
+  },
+
+  // J-3 heads-up when a met rival registers to the same tournament.
+  rival_provocation_before_tournament: {
+    from:    '{{rivalName}}',
+    subject: 'See you at {{tournamentName}}',
+    body:
+      '{{provocationText}}',
+    tag:     'rival',
+  },
 };
 
 if (typeof window !== 'undefined' && window.cl) {

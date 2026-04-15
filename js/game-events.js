@@ -16,6 +16,10 @@
 //   FLOW_BONUS_EARNED   = 'flow_bonus_earned'   // { flowPalier }
 //   COACH_HIRED         = 'coach_hired'         // { coachId, weeklyCost, eloUnlock }
 //   COACH_FIRED         = 'coach_fired'         // { coachId, reason: 'manual'|'cant_afford' }
+//   TOURNAMENT_ROUND_FINISHED = 'tournament_round_finished'
+//     // { tournamentId, tournamentName, round, opponent, playerResult,
+//     //   notableResults: Array<{ rivalId, name, opponentId, opponentName, result }>,
+//     //   finished: boolean }
 //
 // DISCIPLINE: event handlers MUST NOT emit a new event during their own
 // execution. Cascading synchronous emits on the same tick lead to
@@ -35,6 +39,7 @@ const GameEvents = (() => {
     FLOW_BONUS_EARNED:   'flow_bonus_earned',
     COACH_HIRED:         'coach_hired',
     COACH_FIRED:         'coach_fired',
+    TOURNAMENT_ROUND_FINISHED: 'tournament_round_finished',
   };
 
   /** @type {Map<string, Set<Function>>} */

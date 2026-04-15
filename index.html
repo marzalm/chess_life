@@ -179,6 +179,7 @@
         <span id="career-current-coach-name" class="career-coach-button-note hidden">—</span>
       </button>
       <button id="btn-open-inbox" class="career-primary-btn">📬 Inbox <span id="career-inbox-badge" class="career-inbox-badge hidden">0</span></button>
+      <button id="btn-open-rivals" class="career-primary-btn">🎭 Rivals</button>
     </div>
 
     <!-- Dev / test row (will shrink as Phase C/D/E ship real features) -->
@@ -308,9 +309,33 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
+       SCREEN: RIVALS
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="screen-rivals" class="hidden">
+    <button id="btn-rivals-back" class="rivals-back-btn" type="button">← Back to home</button>
+
+    <div class="rivals-wrap">
+      <div class="rivals-header">
+        <h1 class="rivals-title">Rivals</h1>
+        <div id="rivals-summary" class="rivals-summary">—</div>
+      </div>
+
+      <div class="rivals-sort-row">
+        <button id="btn-rivals-sort-elo" class="rivals-sort-btn active" type="button">Sort by Elo</button>
+        <button id="btn-rivals-sort-proximity" class="rivals-sort-btn" type="button">Closest to you</button>
+      </div>
+
+      <div id="rivals-list" class="rivals-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
        SCREEN: IN-TOURNAMENT
   ══════════════════════════════════════════════════════════════ -->
   <div id="screen-tournament" class="hidden">
+
+    <button id="btn-tournament-inbox" class="t-inbox-btn" type="button">📬 Inbox <span id="t-inbox-badge" class="career-inbox-badge hidden">0</span></button>
+    <button id="btn-tournament-rivals" class="t-rivals-btn" type="button">🎭 Rivals</button>
 
     <div class="t-wrap">
 
@@ -605,6 +630,8 @@
   <script src="js/puzzle-system.js"></script>
   <script src="js/tournament-data.js"></script>
   <script src="js/name-pools.js"></script>
+  <script src="js/rival-data.js"></script>
+  <script src="js/rival-system.js"></script>
   <script src="js/tournament-system.js"></script>
   <script src="js/career-flow.js"></script>
   <script src="js/inbox-templates.js"></script>

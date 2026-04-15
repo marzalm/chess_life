@@ -23,7 +23,7 @@ const UICareer = (() => {
 
   // ── Screen router ─────────────────────────────────────────
 
-  const SCREENS = ['character', 'home', 'lobby', 'inbox', 'coaches', 'training', 'tournament', 'game'];
+  const SCREENS = ['character', 'home', 'lobby', 'inbox', 'coaches', 'training', 'tournament', 'rivals', 'game'];
 
   function _showScreen(name) {
     if (!SCREENS.includes(name)) {
@@ -465,6 +465,11 @@ const UICareer = (() => {
 
     onBack() {
       if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      if (typeof CalendarSystem !== 'undefined' && CalendarSystem.isInTournament && CalendarSystem.isInTournament()) {
+        _showScreen('tournament');
+        tournament.render();
+        return;
+      }
       _showScreen('home');
       home.render();
     },
@@ -1292,6 +1297,7 @@ const UICareer = (() => {
         return;
       }
 
+      this._renderInboxBadge();
       this._renderHeader(inst);
       this._renderPairings(inst);
       this._renderStandings(inst);
@@ -1301,6 +1307,19 @@ const UICareer = (() => {
         this._showFinishedPanel(inst);
       } else {
         this._showNextRound(inst);
+      }
+    },
+
+    _renderInboxBadge() {
+      const badgeEl = document.getElementById('t-inbox-badge');
+      if (!badgeEl) return;
+      const unread = (typeof InboxSystem !== 'undefined') ? InboxSystem.getUnreadCount() : 0;
+      if (unread > 0) {
+        badgeEl.textContent = String(unread);
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.textContent = '0';
+        badgeEl.classList.add('hidden');
       }
     },
 
@@ -1607,6 +1626,123 @@ const UICareer = (() => {
     return 'th';
   }
 
+  // ── Rivals screen (F.5) ───────────────────────────────────
+
+  let _rivalsSortMode = 'elo'; // 'elo' | 'proximity'
+
+  function _portraitColorFor(seed) {
+    // Hash the seed string into a hue so each rival has a stable bg color.
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = (hash * 31 + seed.charCodeAt(i)) & 0xffffff;
+    }
+    const hue = hash % 360;
+    return `hsl(${hue}, 45%, 68%)`;
+  }
+
+  const rivals = {
+    render() {
+      if (typeof RivalSystem === 'undefined') return;
+
+      const summaryEl = document.getElementById('rivals-summary');
+      const listEl = document.getElementById('rivals-list');
+      if (!listEl) return;
+
+      const all = RivalSystem.getAll();
+      const visible = all.filter((r) => r.met);
+      if (summaryEl) {
+        summaryEl.textContent = visible.length === 0
+          ? 'No rivals met yet — play some tournaments to find out.'
+          : `${visible.length} met so far`;
+      }
+
+      const player = CareerManager.player.get();
+      let sorted;
+      if (_rivalsSortMode === 'proximity') {
+        sorted = visible.slice().sort((a, b) => {
+          const da = Math.abs(a.elo - player.elo);
+          const db = Math.abs(b.elo - player.elo);
+          if (da !== db) return da - db;
+          return b.elo - a.elo;
+        });
+      } else {
+        sorted = visible.slice().sort((a, b) => b.elo - a.elo);
+      }
+
+      // Sort button state
+      const eloBtn = document.getElementById('btn-rivals-sort-elo');
+      const proxBtn = document.getElementById('btn-rivals-sort-proximity');
+      if (eloBtn) eloBtn.classList.toggle('active', _rivalsSortMode === 'elo');
+      if (proxBtn) proxBtn.classList.toggle('active', _rivalsSortMode === 'proximity');
+
+      listEl.innerHTML = '';
+      for (const r of sorted) {
+        const proto = RivalData.getById(r.id);
+        if (!proto) continue;
+        const card = document.createElement('div');
+        card.className = 'rival-card';
+
+        const portrait = document.createElement('div');
+        portrait.className = 'rival-portrait';
+        portrait.style.background = _portraitColorFor(proto.portraitSeed || proto.id);
+        portrait.textContent = proto.portraitSeed || proto.name.slice(0, 2).toUpperCase();
+
+        const meta = document.createElement('div');
+        meta.className = 'rival-meta';
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'rival-name';
+        const flag = COUNTRY_FLAGS[proto.nationality] || '🏳️';
+        nameRow.textContent = `${flag} ${proto.name}`;
+
+        const statRow = document.createElement('div');
+        statRow.className = 'rival-stat-row';
+
+        const eloSpan = document.createElement('span');
+        eloSpan.textContent = `Elo ${r.elo}`;
+        statRow.appendChild(eloSpan);
+
+        const h = r.headToHead;
+        const h2h = document.createElement('span');
+        h2h.textContent = `H2H W:${h.losses} L:${h.wins} D:${h.draws}`;
+        statRow.appendChild(h2h);
+
+        const rel = document.createElement('span');
+        const relation = RivalSystem.getRelation(r.id);
+        rel.className = `rival-relation ${relation}`;
+        rel.textContent = relation;
+        statRow.appendChild(rel);
+
+        const tag = document.createElement('div');
+        tag.className = 'rival-tagline';
+        tag.textContent = proto.tagline;
+
+        meta.appendChild(nameRow);
+        meta.appendChild(statRow);
+        meta.appendChild(tag);
+        card.appendChild(portrait);
+        card.appendChild(meta);
+        listEl.appendChild(card);
+      }
+    },
+
+    onBack() {
+      if (typeof SoundManager !== 'undefined') SoundManager.playMove();
+      if (typeof CalendarSystem !== 'undefined' && CalendarSystem.isInTournament && CalendarSystem.isInTournament()) {
+        _showScreen('tournament');
+        tournament.render();
+        return;
+      }
+      _showScreen('home');
+      home.render();
+    },
+
+    setSort(mode) {
+      _rivalsSortMode = mode === 'proximity' ? 'proximity' : 'elo';
+      this.render();
+    },
+  };
+
   // ── Bindings ──────────────────────────────────────────────
 
   function _bindButtons() {
@@ -1666,6 +1802,48 @@ const UICareer = (() => {
         _showScreen('inbox');
         inbox.render();
       });
+    }
+
+    const btnTournamentInbox = document.getElementById('btn-tournament-inbox');
+    if (btnTournamentInbox) {
+      btnTournamentInbox.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('inbox');
+        inbox.render();
+      });
+    }
+
+    const btnOpenRivals = document.getElementById('btn-open-rivals');
+    if (btnOpenRivals) {
+      btnOpenRivals.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('rivals');
+        rivals.render();
+      });
+    }
+
+    const btnTournamentRivals = document.getElementById('btn-tournament-rivals');
+    if (btnTournamentRivals) {
+      btnTournamentRivals.addEventListener('click', () => {
+        if (typeof SoundManager !== 'undefined') SoundManager.playSFActivate();
+        _showScreen('rivals');
+        rivals.render();
+      });
+    }
+
+    const btnRivalsBack = document.getElementById('btn-rivals-back');
+    if (btnRivalsBack) {
+      btnRivalsBack.addEventListener('click', () => rivals.onBack());
+    }
+
+    const btnRivalsSortElo = document.getElementById('btn-rivals-sort-elo');
+    if (btnRivalsSortElo) {
+      btnRivalsSortElo.addEventListener('click', () => rivals.setSort('elo'));
+    }
+
+    const btnRivalsSortProximity = document.getElementById('btn-rivals-sort-proximity');
+    if (btnRivalsSortProximity) {
+      btnRivalsSortProximity.addEventListener('click', () => rivals.setSort('proximity'));
     }
 
     const btnTraining = document.getElementById('btn-open-training');
@@ -1769,6 +1947,7 @@ const UICareer = (() => {
 
       GameEvents.on(GameEvents.EVENTS.MAIL_RECEIVED, () => {
         home.renderInboxBadge();
+        tournament._renderInboxBadge();
         const inboxScreen = document.getElementById('screen-inbox');
         if (inboxScreen && !inboxScreen.classList.contains('hidden')) {
           inbox.render();

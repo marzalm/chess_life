@@ -9,6 +9,154 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### Phase F playtest fixes (2026-04-15)
+
+First playtest pass after Phase F shipped. Fixes UX confusion and three
+integration bugs identified during the post-ship review.
+
+- **Rivals screen hides unmet rivals.** Before the player has faced a
+  rival over the board, the rival does not appear in the screen at all.
+  Summary now reads "N met so far" instead of "N/8 met" to avoid
+  spoiling the roster size. First encounter happens purely through
+  the tournament field; the Rivals screen becomes populated only as
+  rivalries emerge.
+- **In-tournament `🎭 Rivals` button.** The tournament screen now
+  exposes a Rivals button next to the Inbox one. Returning from the
+  Rivals screen respects the current phase and lands back on the
+  tournament screen when `CalendarSystem.isInTournament()` is true.
+- **Rival Elo no longer drifts mid-tournament.** Previously,
+  `recordPlayerResult()` immediately updated the live rival Elo and
+  wrote it back into `field[i].elo`, which biased the Swiss sort
+  (`score DESC, elo DESC`) for subsequent rounds because NPC opponents
+  kept their tournament-start Elo. Rival encounters are now applied
+  only in `TournamentSystem.finalize()`, walking `inst.history` once
+  and calling `RivalSystem.markMet` + `recordEncounter` per direct
+  pairing. Field Elo stays stable through the whole tournament.
+- **New API `CalendarSystem.advanceDaysSilently(n)`.** Replaces the
+  direct `cal.date = finalDate` jump in `TournamentSystem.finalize`
+  with a per-day loop that fires `onDayAdvanced` handlers without
+  consuming queued events. Fixes two pre-existing bugs exposed by
+  Phase F:
+  - rival drift and commitment-mail processing ran only during manual
+    Continue; the skipped tournament days silently bypassed them
+  - coach weekly cost could fail to be deducted when the skip crossed
+    the 7-day mark
+  `StaffSystem`, `RivalSystem`, and any future `onDayAdvanced`
+  subscriber now receive ticks for every skipped day.
+- **`RivalSystem` getters are deep-cloned.** `getAll()`, `getById()`,
+  and `getCommittedRivalsForTournament()` now return
+  `JSON.parse(JSON.stringify(...))` copies. This restores the
+  black-box boundary: external callers cannot mutate `headToHead`,
+  `recentForm`, or `committedTournaments` by reaching into the
+  returned objects.
+- **Tests.** `tests/calendar-system.test.js` +2 cases for
+  `advanceDaysSilently`. `tests/tournament-system.test.js` reworked
+  the direct-encounter test to assert that H2H and Elo changes happen
+  at finalize, not mid-tournament. Full suite at **334 passed, 0
+  failed**.
+
+### Phase F — rivals and narration (2026-04-15)
+
+First shipped slice of Phase F: 8 persistent NPC rivals, tournament
+injection with "notable player" framing before first meeting, soft
+story hooks via inbox, co-registration and a soft last-round pairing
+preference, and a minimal Rivals screen.
+
+#### 1. Rival state and data
+- new `js/rival-data.js`: catalogue of 8 named rivals across Elo 950–2200,
+  with archetypes (`rising`, `steady`, `declining`, `volatile`),
+  taglines, and portrait seeds
+- new `js/rival-system.js`: owner of persisted `career.rivals[]`. Public
+  API covers `init`, `getAll`, `getById`, `getNearestToPlayer`,
+  `getEligibleForTournament`, `markMet`, `recordEncounter`,
+  `tickOffscreenProgression`, `getRelation`, `isHeatedRivalry`,
+  `rollRivalCoRegistrations`, and `processCommitmentMails`
+- offscreen Elo drift is applied weekly via
+  `CalendarSystem.onDayAdvanced` using archetype-specific weekly mean
+  and amplitude, clamped inside per-archetype bands
+- `relation` is derived (not stored): `antagonist` when the rival's
+  H2H wins - losses ≥ 2; `friend` when the player leads by ≥ 3 over
+  at least 3 total encounters; `neutral` otherwise
+
+#### 2. Tournaments inject rivals
+- `TournamentSystem.startTournament` now includes 1–3 eligible rivals
+  in the field, guaranteed to include any rival with a live
+  co-registration commitment
+- direct player-vs-rival pairings flip `met=true` and call
+  `RivalSystem.recordEncounter`, which updates H2H counters and the
+  rival's Elo via the same FIDE formula
+- new event `tournament_round_finished` carries
+  `{ tournamentId, round, playerResult, notableResults[], finished }`
+  so the inbox can react round-by-round
+
+#### 3. Inbox during tournaments (F.0)
+- the tournament screen now has a `📬 Inbox` button with a live unread
+  badge, so press and rival beats that fire mid-tournament can be read
+  without abandoning the round
+- the inbox back button routes back to the tournament screen when
+  `CalendarSystem.isInTournament()` is true
+- inbox stays read-only in scope for F: no mail action is ever wired to
+  navigate away from the tournament or schedule anything
+
+#### 4. Inbox templates and narration (F.3)
+- new templates: `round_press_player_result` (tone varies on
+  `playerResult`), `rival_round_watch` (only for met rivals),
+  `rival_provocation_before_tournament` (J-3 of a co-registered tournament)
+- `InboxSystem` subscribes to `tournament_round_finished` and dispatches
+  the press + rival-watch mails through `queueMicrotask` to respect the
+  no-reentrancy rule on the event bus
+
+#### 5. Co-registration + soft pairing bias (F.4)
+- `TournamentSystem.register()` delegates to
+  `RivalSystem.rollRivalCoRegistrations()`: each met + Elo-eligible
+  rival rolls 50% (+10% if heated) to sign up for the same instance
+- committed rivals persist in `career.rivals[i].committedTournaments[]`
+  and are guaranteed into the field when the tournament starts
+- `RivalSystem.processCommitmentMails` (day-tick) pushes the
+  provocation mail at J-3 and garbage-collects past-start commitments
+- `_pairRound` adds a **soft** last-round bias: when the player and a
+  met rival are both in the top 4 with a score gap ≤ 1 and have not
+  faced each other, they are paired preferentially. No score-group or
+  rematch rules are violated; any other last-round pairing falls back
+  to standard Monrad
+
+#### 6. Rivals screen (F.5)
+- new `🎭 Rivals` home button and `#screen-rivals` with portrait
+  placeholders (initials in a hashed background color), flag, Elo,
+  H2H counters, derived relation, and rival tagline
+- sort toggle: by Elo or by proximity to the player's current rating
+- rivals not yet met show as "A notable player on the circuit." with
+  "Not yet met" and hide the tagline — the review's first-encounter
+  framing
+
+#### 7. Tests
+- new `tests/rival-system.test.js`: 26 cases covering seed/normalize,
+  getters, markMet, recordEncounter + H2H, relation derivation,
+  offscreen drift across a year, clamp enforcement, and
+  co-registration
+- `tests/tournament-system.test.js` adds 4 F.2 rival-integration cases
+  (field injection, encounter, and notable results)
+- `tests/inbox-system.test.js` adds 4 F.3 narration cases
+  (round press, rival watch gating by met, tone variation, provocation
+  template render)
+- full suite now at **332 tests, 0 failed** across 10 suites
+
+### Documentation sync and handoff refresh (2026-04-15)
+
+Quick documentation pass to align the project docs with the shipped
+post-E.5 codebase.
+
+- refreshed `HANDOFF.md` from the old April 11 tournament-era snapshot
+  to the current state: Phase E.5 complete, 9 active test suites, 298
+  green tests, and the current module map
+- updated `CLAUDE.md` so the Training Hub description matches the
+  shipped behavior: coach-led sessions prepare tournament-scoped
+  bonuses, while `Solo practice` is a zero-impact `🎲 Random puzzle`
+  mode
+- added a shipped-state note to `PHASE_E_DESIGN.md` so the older E.1-E.4
+  historical sections are clearly marked as superseded where E.5 and
+  later bugfixes changed the design
+
 ### Tournament stale-reference fix after mid-round save/reload (2026-04-12)
 
 Fixes a tournament corruption bug that could surface after bonus

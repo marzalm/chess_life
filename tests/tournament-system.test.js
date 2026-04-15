@@ -983,6 +983,126 @@ test('finalize emits tournament_finished with eloBefore and eloAfter', () => {
   assert('eloAfter' in ev.payload, 'payload should include eloAfter');
 });
 
+// ── F.2 — rival injection / encounter / notable results ──────
+
+console.log('\n── F.2: rivals in tournaments ──');
+
+const _rivalDataCode = fs.readFileSync(path.join(__dirname, '..', 'js', 'rival-data.js'), 'utf8');
+const RivalData = (new Function(`${_rivalDataCode}\nreturn RivalData;`))();
+
+let _rivalSavedState;
+const RivalCareerManager = {
+  player: { get: () => _player },
+  save: () => {},
+  _rawState: () => _rivalSavedState,
+};
+const _rivalSysCode = fs.readFileSync(path.join(__dirname, '..', 'js', 'rival-system.js'), 'utf8');
+const RivalSystem = (new Function(
+  'CareerManager', 'CalendarSystem', 'RivalData',
+  `${_rivalSysCode}\nreturn RivalSystem;`,
+))(RivalCareerManager, CalendarSystem, RivalData);
+
+// Rebuild TournamentSystem with rivals injected so _buildRivalEntries
+// sees them.
+const TournamentSystemWithRivals = (new Function(
+  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem',
+  'RivalData', 'RivalSystem',
+  `${sysCode}\nreturn TournamentSystem;`,
+))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem, RivalData, RivalSystem);
+
+const RIVAL_GAME_EVENTS_KEY = 'TOURNAMENT_ROUND_FINISHED';
+GameEvents.EVENTS[RIVAL_GAME_EVENTS_KEY] = 'tournament_round_finished';
+
+function _rivalsTest(name, fn) {
+  resetMocks();
+  _rivalSavedState = { player: { elo: 1500 }, rivals: [] };
+  RivalSystem._teardown();
+  RivalSystem.init();
+  try {
+    fn();
+    console.log('  ✓', name);
+    passed++;
+  } catch (e) {
+    console.log('  ✗', name);
+    console.log('     →', e.message);
+    failed++;
+    failures.push({ name, message: e.message });
+  }
+}
+
+_rivalsTest('startTournament injects at least one eligible rival into the field', () => {
+  // Tier 1 home tournament (local_weekend_open) has a wide enough Elo
+  // window to catch at least a few starter rivals.
+  TournamentSystemWithRivals.startTournament(_samplePayload('local_weekend_open'));
+  const inst = TournamentSystemWithRivals.getCurrentInstance();
+  const rivals = inst.field.filter((f) => f.isRival);
+  assert(rivals.length >= 1 && rivals.length <= 3, `expected 1..3 rivals, got ${rivals.length}`);
+  for (const r of rivals) {
+    assert(typeof r.id === 'string' && r.id.startsWith('rival_'), 'rival id kept');
+  }
+});
+
+_rivalsTest('injected rivals carry the catalogue nationality and current Elo', () => {
+  TournamentSystemWithRivals.startTournament(_samplePayload('local_weekend_open'));
+  const inst = TournamentSystemWithRivals.getCurrentInstance();
+  const rivalEntry = inst.field.find((f) => f.isRival);
+  assert(rivalEntry, 'at least one rival injected');
+  const proto = RivalData.getById(rivalEntry.id);
+  assertEq(rivalEntry.nationality, proto.nationality);
+  const live = RivalSystem.getById(rivalEntry.id);
+  assertEq(rivalEntry.elo, live.elo);
+});
+
+_rivalsTest('rival encounter is applied at finalize, not mid-tournament', () => {
+  // Force the player to face a known rival in round 1 by planting a pairing
+  TournamentSystemWithRivals.startTournament(_samplePayload('local_weekend_open'));
+  const inst = TournamentSystemWithRivals.getCurrentInstance();
+  const rivalEntry = inst.field.find((f) => f.isRival);
+  if (!rivalEntry) throw new Error('need a rival in field');
+
+  inst.currentPairings = [{
+    white: inst.field.find((f) => f.id === 'player'),
+    black: rivalEntry,
+  }, ...inst.currentPairings.filter((p) => {
+    const touchesPlayer = (p.white && p.white.id === 'player') || (p.black && p.black.id === 'player');
+    const touchesRival  = (p.white && p.white.id === rivalEntry.id) || (p.black && p.black.id === rivalEntry.id);
+    return !touchesPlayer && !touchesRival;
+  })];
+
+  const eloBefore = RivalSystem.getById(rivalEntry.id).elo;
+  TournamentSystemWithRivals.recordPlayerResult(1);
+
+  // Mid-tournament: no change applied yet to rival state
+  const midway = RivalSystem.getById(rivalEntry.id);
+  assertEq(midway.headToHead.losses, 0, 'no H2H change before finalize');
+  assertEq(midway.elo, eloBefore, 'rival elo unchanged mid-tournament');
+
+  // Field Elo for the rival is also stable inside the Swiss sort
+  const canonical = inst.field.find((f) => f.id === rivalEntry.id);
+  assertEq(canonical.elo, eloBefore, 'field elo stable mid-tournament');
+
+  // Finish the tournament and finalize
+  while (!TournamentSystemWithRivals.isFinished()) {
+    TournamentSystemWithRivals.recordPlayerResult(0.5);
+  }
+  TournamentSystemWithRivals.finalize();
+
+  const after = RivalSystem.getById(rivalEntry.id);
+  assertEq(after.headToHead.losses, 1, 'H2H updated at finalize');
+  assert(after.elo <= eloBefore, 'rival elo decreased after finalize');
+  assert(after.met === true, 'met flipped');
+});
+
+_rivalsTest('tournament_round_finished event carries player result and notable rival results', () => {
+  TournamentSystemWithRivals.startTournament(_samplePayload('local_weekend_open'));
+  TournamentSystemWithRivals.recordPlayerResult(0.5);
+  const ev = _emittedEvents.find((e) => e.eventName === 'tournament_round_finished');
+  assert(ev, 'expected tournament_round_finished emitted');
+  assert('round' in ev.payload);
+  assert('playerResult' in ev.payload);
+  assert(Array.isArray(ev.payload.notableResults), 'notableResults is an array');
+});
+
 // ── Summary ───────────────────────────────────────────────────
 
 console.log(`\nResult: ${passed} passed, ${failed} failed\n`);

@@ -107,6 +107,68 @@ const InboxSystem = (() => {
     });
   }
 
+  // ── Phase F.3 — rival / round narration ─────────────────────
+
+  function _resultPhrase(result) {
+    if (result === 'win')  return 'scored a win';
+    if (result === 'draw') return 'settled for a draw';
+    if (result === 'loss') return 'was beaten';
+    if (result === 'bye')  return 'received a bye';
+    return 'played';
+  }
+
+  function _pressFlavor(result) {
+    if (result === 'win')  return 'The scoreboard moves.';
+    if (result === 'draw') return 'A cautious half-point shared.';
+    if (result === 'loss') return 'A setback they will want to bury fast.';
+    if (result === 'bye')  return 'A rest day that keeps the clock honest.';
+    return '';
+  }
+
+  function _rivalVerbFromResult(result) {
+    if (result === 'win')  return 'took the point';
+    if (result === 'draw') return 'held a draw';
+    if (result === 'loss') return 'dropped the point';
+    return 'played';
+  }
+
+  function _scheduleRoundPressMail(payload) {
+    queueMicrotask(() => {
+      if (!payload || !payload.opponent) return;
+      const player = CareerManager.player.get();
+      InboxSystem.push('round_press_player_result', {
+        playerName:     player.playerName || 'Player',
+        round:          payload.round,
+        tournamentName: payload.tournamentName || 'the tournament',
+        opponentName:   payload.opponent.name || 'their opponent',
+        opponentElo:    payload.opponent.elo || '?',
+        resultPhrase:   _resultPhrase(payload.playerResult),
+        flavor:         _pressFlavor(payload.playerResult),
+      });
+    });
+  }
+
+  function _scheduleRivalRoundWatchMails(payload) {
+    if (typeof RivalSystem === 'undefined') return;
+    const results = Array.isArray(payload.notableResults) ? payload.notableResults : [];
+    if (results.length === 0) return;
+
+    // Only push about rivals the player has already met.
+    for (const r of results) {
+      const rival = RivalSystem.getById(r.rivalId);
+      if (!rival || !rival.met) continue;
+      queueMicrotask(() => {
+        InboxSystem.push('rival_round_watch', {
+          round:          payload.round,
+          rivalName:      r.name,
+          rivalVerb:      _rivalVerbFromResult(r.result),
+          opponentName:   r.opponentName,
+          tournamentName: payload.tournamentName || 'the tournament',
+        });
+      });
+    }
+  }
+
   return {
     init() {
       if (_initialized) return;
@@ -131,6 +193,16 @@ const InboxSystem = (() => {
         GameEvents.EVENTS.COACH_FIRED,
         (payload) => _scheduleCoachFiredMail(payload),
       );
+
+      if (GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED) {
+        GameEvents.on(
+          GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED,
+          (payload) => {
+            _scheduleRoundPressMail(payload);
+            _scheduleRivalRoundWatchMails(payload);
+          },
+        );
+      }
     },
 
     push(templateId, vars = {}, options = {}) {

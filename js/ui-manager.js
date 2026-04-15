@@ -1275,6 +1275,7 @@ window.addEventListener('DOMContentLoaded', () => {
   CalendarSystem.init();
   CareerFlow.init();
   StaffSystem.init();
+  RivalSystem.init();
   InboxSystem.init();
   PuzzleSystem.init();
   UIManager.init();

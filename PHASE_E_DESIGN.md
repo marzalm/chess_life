@@ -1,15 +1,22 @@
 # Phase E Design
 
+> Historical note: sections 1-7 preserve the design snapshots that led
+> to Phase E. Several details in those sections were later simplified or
+> superseded during E.5 and the subsequent playtest fixes. For the
+> **currently shipped architecture**, read section **10 — Shipped Phase E
+> state (2026-04-15)** first.
+
 ## 1. Scope and sub-phase breakdown
 
-Phase E is the first concrete delivery of Chess Life's hidden-trainer promise. The mechanic is a puzzle-under-pressure loop with two bonus sources that coexist: training bonuses earned out of game, and Flow bonuses earned in game. To keep this shippable and testable, Phase E is split into four sub-phases:
+Phase E is the first concrete delivery of Chess Life's hidden-trainer promise. The mechanic is a puzzle-under-pressure loop with two bonus sources that coexist: training bonuses earned out of game, and Flow bonuses earned in game. The final shipped Phase E ended up split into **five** sub-phases:
 
 - **E.1 — Puzzle foundation**: `puzzle-data.js`, `puzzle-system.js`, standalone self-training, aptitudes, seen-puzzle tracking, reinforcement queues, Node tests.
 - **E.2 — In-game training bonus path**: training-bonus inventory, invoke-from-game, suspend real game, temporary puzzle board, resolve, Stockfish playback reward.
 - **E.3 — Coach + finance layer**: `coach-data.js`, `staff-system.js`, single coach slot, weekly cost, coach-browser UI, coach quality applied to sessions and rewards.
 - **E.4 — Flow integration**: gain one Flow bonus per Flow entry, hidden-theme puzzle reveal, unseen-puzzle invariant, reveal card, bonus events finalized.
+- **E.5 — Training Hub**: coach-theme sessions on the puzzle board, per-theme puzzle ratings, tournament-scoped preparation bonuses, and free-play solo practice.
 
-This document goes deep only on **E.1**. E.2-E.4 are defined here only at scope level.
+This document began as an E.1-first spec and later accumulated the E.2-E.5 design passes. The older sections remain valuable as historical context, but some internal details there no longer match the shipped code after the E.5 simplification pass.
 
 ## 2. Locked decisions
 
@@ -410,3 +417,43 @@ Expected test impact: `staff-system` roughly flat at `18-22`, `puzzle-system` gr
 ## 9. Risks
 
 The biggest E.1 risk is overscoping the session model and accidentally building half of E.2. Keep `puzzle-system.js` pure and boring: selection, persistence, reinforcement, aptitude, bonus count. The second risk is data sparsity per theme; if the starter pool is too small, seen-puzzle and reinforcement behavior will look broken, so even a "small" Phase E dataset needs enough per-theme headroom to exercise the rules honestly.
+
+## 10. Shipped Phase E state (2026-04-15)
+
+This section is the authoritative summary of what actually shipped after
+the E.5 redesign and the later playtest fixes.
+
+- **Coach model**: the old 22-skill matrix is gone. Coaches now use
+  `primaryThemes[]` plus explicit `bonusMoves`. The canonical API is
+  `StaffSystem.getCurrentCoachBonusMoves(theme)`.
+- **Training Hub**: coach-led sessions are the progression path. They
+  use the locked `3-streak / 6 solves / 18 attempts` structure, consume
+  **1 calendar day** through `CalendarSystem.advanceOneDay()`, and
+  prepare tournament-scoped bonuses.
+- **Solo practice**: no longer a theme-by-theme training path. It is a
+  single `🎲 Random puzzle` button with **zero** career impact:
+  no rating updates, no seen tracking, no reinforcement changes, no
+  bonuses, no calendar cost.
+- **Puzzle progression**: puzzle rating is now **per theme** via
+  `training.puzzleRatings[theme]` and `training.puzzleRatingRds[theme]`.
+  `getAptitude(theme)` is derived from rating rather than persisted as
+  its own progression axis.
+- **Training bonuses**: no permanent stacked inventory anymore.
+  `training.trainingBonuses[theme]` now stores:
+  `prepared`, `usedThisGame`, and `lockedUntilTournamentEnd`.
+  Prepared themes reset between tournament games and are cleared on
+  tournament finalize.
+- **Flow bonuses**: earned on **every upward palier transition** while
+  the slot is empty, never stack above one, and are lost on Flow exit if
+  unused.
+- **Blitz Decay**: shipped as a **vertical fuse bar on the right side of
+  the board**. Reward base is `3 / 2 / 1` by tier, then modified by
+  coach bonus and derived aptitude.
+- **Puzzle color handling**: both training and Flow puzzle pickers
+  prefer the player’s live game color when possible, using normalized
+  post-setup FENs from `puzzle-data.js`.
+- **Tournament integrity fix**: after E.5, `TournamentSystem` was
+  hardened against mid-round save/reload. Pairings are re-linked to the
+  canonical `field` entries before score/opponent mutation, preventing
+  stale-reference corruption after bonus-triggered saves.
+- **Current baseline**: all 9 suites are green at **298 tests**.

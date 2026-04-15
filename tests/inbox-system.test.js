@@ -86,6 +86,7 @@ function reset() {
   };
 
   GameEvents = buildGameEventsMock();
+  GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED = 'tournament_round_finished';
   GameEvents.on(GameEvents.EVENTS.MAIL_RECEIVED, (payload) => {
     _receivedEvents.push(payload);
   });
@@ -106,10 +107,23 @@ function reset() {
     path.join(__dirname, '..', 'js', 'inbox-system.js'),
     'utf8',
   );
+  const RivalSystemMock = {
+    _rivals: new Map(),
+    setRival(id, data) { this._rivals.set(id, data); },
+    clearAll() { this._rivals = new Map(); },
+    getById(id) { return this._rivals.get(id) || null; },
+  };
+  RivalSystemMock.clearAll();
+  // Seed both possible rivals with met=true by default so tests can
+  // opt-in to "unmet" by explicitly overriding.
+  RivalSystemMock.setRival('rival_novak_pavel', { id: 'rival_novak_pavel', met: true });
+  RivalSystemMock.setRival('rival_tanaka_yuki', { id: 'rival_tanaka_yuki', met: true });
+
   InboxSystem = (new Function(
-    'CareerManager', 'CalendarSystem', 'GameEvents', 'InboxTemplates', 'CoachData',
+    'CareerManager', 'CalendarSystem', 'GameEvents', 'InboxTemplates', 'CoachData', 'RivalSystem',
     `${systemCode}\nreturn InboxSystem;`,
-  ))(CareerManager, CalendarSystem, GameEvents, InboxTemplates, CoachData);
+  ))(CareerManager, CalendarSystem, GameEvents, InboxTemplates, CoachData, RivalSystemMock);
+  CareerManager._rivalMock = RivalSystemMock;
 }
 
 let passed = 0;
@@ -436,6 +450,83 @@ function assertEq(actual, expected, msg) {
     await flushMicrotasks();
     assertEq(_inboxState.mails[0].templateId, 'inbox_coach_fired_no_funds');
     assert(_inboxState.mails[0].body.includes('$520'));
+  });
+
+  console.log('\n── F.3: round press + rival watch ──');
+
+  await test('TOURNAMENT_ROUND_FINISHED pushes a round_press_player_result mail', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED, {
+      tournamentId: 'local_weekend_open',
+      tournamentName: 'Local Weekend Open',
+      round: 2,
+      opponent: { id: 'opp_abc', name: 'Opponent X', elo: 1550 },
+      playerResult: 'win',
+      notableResults: [],
+      finished: false,
+    });
+    await flushMicrotasks();
+    const mails = _inboxState.mails.filter((m) => m.templateId === 'round_press_player_result');
+    assertEq(mails.length, 1);
+    assert(mails[0].body.includes('Opponent X'), 'body mentions opponent');
+    assert(mails[0].body.includes('Tester'), 'body mentions player name');
+  });
+
+  await test('TOURNAMENT_ROUND_FINISHED pushes rival_round_watch only for met rivals', async () => {
+    InboxSystem.init();
+    // Pavel is met, Yuki is unmet for this test
+    CareerManager._rivalMock.setRival('rival_tanaka_yuki', { id: 'rival_tanaka_yuki', met: false });
+
+    GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED, {
+      tournamentId: 'local_weekend_open',
+      tournamentName: 'Local Weekend Open',
+      round: 3,
+      opponent: { id: 'opp_y', name: 'Other', elo: 1200 },
+      playerResult: 'draw',
+      notableResults: [
+        { rivalId: 'rival_novak_pavel', name: 'Pavel Novák', opponentId: 'opp_q', opponentName: 'Q', result: 'win' },
+        { rivalId: 'rival_tanaka_yuki', name: 'Yuki Tanaka', opponentId: 'opp_r', opponentName: 'R', result: 'loss' },
+      ],
+      finished: false,
+    });
+    await flushMicrotasks();
+
+    const watchMails = _inboxState.mails.filter((m) => m.templateId === 'rival_round_watch');
+    assertEq(watchMails.length, 1, 'only the met rival gets a mail');
+    assert(watchMails[0].body.includes('Pavel Novák'), 'mentions Pavel');
+  });
+
+  await test('round_press_player_result tone varies with playerResult', async () => {
+    InboxSystem.init();
+    for (const result of ['win', 'draw', 'loss']) {
+      GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED, {
+        tournamentId: 't',
+        tournamentName: 'Test Open',
+        round: 1,
+        opponent: { id: 'o', name: 'Opp', elo: 1200 },
+        playerResult: result,
+        notableResults: [],
+        finished: false,
+      });
+    }
+    await flushMicrotasks();
+    const mails = _inboxState.mails.filter((m) => m.templateId === 'round_press_player_result');
+    assertEq(mails.length, 3);
+    const bodies = mails.map((m) => m.body).join('\n');
+    assert(bodies.includes('scored a win'), 'win phrasing present');
+    assert(bodies.includes('draw'), 'draw phrasing present');
+    assert(bodies.includes('beaten'), 'loss phrasing present');
+  });
+
+  await test('rival_provocation_before_tournament template renders with vars', async () => {
+    const mail = InboxSystem.push('rival_provocation_before_tournament', {
+      rivalName: 'Pavel Novák',
+      tournamentName: 'Prague Open',
+      provocationText: 'See you there. Bring your good nerves.',
+    });
+    assert(mail.subject.includes('Prague Open'));
+    assert(mail.body.includes('nerves'));
+    assertEq(mail.from, 'Pavel Novák');
   });
 
   console.log(`\nResult: ${passed} passed, ${failed} failed\n`);

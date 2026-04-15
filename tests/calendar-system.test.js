@@ -407,6 +407,33 @@ test('advanceOneDay increments the date by exactly one day and fires tick handle
   assertEq(ticks, 1);
 });
 
+test('advanceDaysSilently fires N ticks without consuming queued events', () => {
+  CalendarSystem.init();
+  CalendarSystem.scheduleEvent({
+    date: { year: 2026, month: 4, day: 15 },
+    type: 'tournament_start',
+    label: 'Test',
+    payload: {},
+  });
+  let ticks = 0;
+  const unsubscribe = CalendarSystem.onDayAdvanced(() => { ticks += 1; });
+  const final = CalendarSystem.advanceDaysSilently(10);
+  unsubscribe();
+  assertEq(ticks, 10);
+  assertEq(CalendarSystem.getDate(), final);
+  // The queued event must still be in the queue — not consumed.
+  assertEq(CalendarSystem.getAllEvents().length, 1);
+});
+
+test('advanceDaysSilently rejects negative or non-finite n', () => {
+  CalendarSystem.init();
+  const before = CalendarSystem.getDate();
+  CalendarSystem.advanceDaysSilently(-5);
+  CalendarSystem.advanceDaysSilently(Infinity);
+  CalendarSystem.advanceDaysSilently(NaN);
+  assertEq(CalendarSystem.getDate(), before);
+});
+
 test('continue — day tick handlers fire once per day advanced up to the cap', () => {
   CalendarSystem.init();
   let ticks = 0;

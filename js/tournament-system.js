@@ -444,6 +444,17 @@ const TournamentSystem = (() => {
         },
       });
 
+      // F.4 — co-registration: met rivals in the Elo window may decide
+      // to sign up for the same event. Delegates probability and state
+      // writes to RivalSystem to keep tournament as a pure orchestrator.
+      if (typeof RivalSystem !== 'undefined' && RivalSystem.rollRivalCoRegistrations) {
+        try {
+          RivalSystem.rollRivalCoRegistrations(tournamentId, t, date, resolved.name);
+        } catch (e) {
+          console.error('[Tournament] rival co-registration failed:', e);
+        }
+      }
+
       return { ok: true, eventId };
     },
 
@@ -512,7 +523,16 @@ const TournamentSystem = (() => {
       const usedNames = new Set();
       usedNames.add(field[0].name);
 
-      for (let i = 0; i < fieldSize - 1; i++) {
+      // F.2 — inject 1..3 rivals eligible for this tournament's window.
+      // We inject BEFORE generic opponents so their names reserve slots.
+      const rivalEntries = _buildRivalEntries(t, CalendarSystem.getDate());
+      for (const entry of rivalEntries) {
+        field.push(entry);
+        usedNames.add(entry.name);
+      }
+
+      const remaining = fieldSize - field.length;
+      for (let i = 0; i < remaining; i++) {
         // Try up to 12 times to get a unique name before accepting a
         // collision. 12 is enough for any realistically sized pool —
         // even the fallback has ~24 * 24 = 576 combinations.
@@ -652,6 +672,10 @@ const TournamentSystem = (() => {
         });
       }
 
+      // Build the notable rival results list BEFORE clearing pairings
+      // for the next round.
+      const notableResults = _extractNotableRivalResults(inst, roundResults);
+
       inst.history.push({ round: inst.currentRound, results: roundResults });
       inst.currentRound += 1;
 
@@ -671,6 +695,17 @@ const TournamentSystem = (() => {
           result,
           score: playerScore,
           source,
+        });
+      }
+      if (typeof GameEvents !== 'undefined' && GameEvents.EVENTS && GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED) {
+        GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED, {
+          tournamentId:   inst.tournamentId,
+          tournamentName: inst.tournamentName,
+          round,
+          opponent,
+          playerResult:   result,
+          notableResults,
+          finished,
         });
       }
       return { ok: true, finished, result, round, opponent };
@@ -779,8 +814,47 @@ const TournamentSystem = (() => {
       }
 
       const cal = CareerManager.calendar.get();
-      const finalDate = _addCalDays(cal.date, inst.daysDuration);
       const eloAfter = CareerManager.player.get().elo;
+
+      // F.3 fix — apply rival encounters once, at finalize time, so
+      // rival Elo never drifts mid-tournament and bias the Swiss sort.
+      // Walk the full history and record each direct player-vs-rival
+      // pairing against the rival's live state.
+      if (typeof RivalSystem !== 'undefined') {
+        try {
+          const playerEloNow = CareerManager.player.get().elo;
+          for (const round of inst.history) {
+            for (const rr of round.results) {
+              if (rr.black === null) continue;
+              const whiteIsPlayer = rr.white === 'player';
+              const blackIsPlayer = rr.black === 'player';
+              if (!whiteIsPlayer && !blackIsPlayer) continue;
+              const rivalId = whiteIsPlayer ? rr.black : rr.white;
+              if (typeof rivalId !== 'string' || !rivalId.startsWith('rival_')) continue;
+
+              const playerScore = whiteIsPlayer ? rr.scoreW : rr.scoreB;
+              const result = playerScore === 1 ? 'win' : (playerScore === 0.5 ? 'draw' : 'loss');
+
+              RivalSystem.markMet(rivalId, inst.startDate);
+              RivalSystem.recordEncounter(rivalId, result, playerEloNow, inst.startDate);
+            }
+          }
+          // Clear any leftover commitment for this instance.
+          if (RivalSystem.clearCommitment) {
+            for (const r of RivalSystem.getAll()) {
+              RivalSystem.clearCommitment(r.id, inst.tournamentId, inst.startDate);
+            }
+          }
+        } catch (e) {
+          console.error('[Tournament] finalize rival sync failed:', e);
+        }
+      }
+
+      // Fire day ticks for every skipped day so recurring subscribers
+      // (coach salary, rival drift, provocation mails) run normally.
+      const finalDate = CalendarSystem.advanceDaysSilently
+        ? CalendarSystem.advanceDaysSilently(inst.daysDuration)
+        : _addCalDays(cal.date, inst.daysDuration);
 
       const summary = {
         tournamentId:   inst.tournamentId,
@@ -804,8 +878,11 @@ const TournamentSystem = (() => {
         PuzzleSystem.clearTrainingBonusesAfterTournament();
       }
 
-      // Advance the calendar by daysDuration days
-      cal.date              = _cloneDate(finalDate);
+      // advanceDaysSilently already moved cal.date; when unavailable
+      // (fallback), _addCalDays returned the target date.
+      if (!CalendarSystem.advanceDaysSilently) {
+        cal.date = _cloneDate(finalDate);
+      }
       cal.phase             = 'idle';
       cal.currentTournament = null;
       cal.currentEvent      = null;
@@ -856,9 +933,113 @@ const TournamentSystem = (() => {
       elo:            opp.elo,
       nationality:    opp.nationality,
       isPlayer:       false,
+      isRival:        false,
       score:          0,
       opponentsFaced: [],
     };
+  }
+
+  /**
+   * Collect round results involving a rival (excluding the player's own
+   * match — that is already the `playerResult` in the payload).
+   * Each entry: { rivalId, name, opponentId, opponentName, result }
+   * where result is from the rival's perspective ('win'|'draw'|'loss').
+   */
+  function _extractNotableRivalResults(inst, roundResults) {
+    const out = [];
+    for (const rr of roundResults) {
+      const whiteId = rr.white;
+      const blackId = rr.black;
+      if (blackId === null) continue; // bye
+
+      const whiteIsPlayer = whiteId === 'player';
+      const blackIsPlayer = blackId === 'player';
+      if (whiteIsPlayer || blackIsPlayer) continue;
+
+      const whiteIsRival = typeof whiteId === 'string' && whiteId.startsWith('rival_');
+      const blackIsRival = typeof blackId === 'string' && blackId.startsWith('rival_');
+      if (!whiteIsRival && !blackIsRival) continue;
+
+      const whiteEntry = _getCanonicalFieldEntry(inst, whiteId);
+      const blackEntry = _getCanonicalFieldEntry(inst, blackId);
+
+      if (whiteIsRival) {
+        const res = rr.scoreW === 1 ? 'win' : (rr.scoreW === 0.5 ? 'draw' : 'loss');
+        out.push({
+          rivalId:      whiteId,
+          name:         whiteEntry.name,
+          opponentId:   blackId,
+          opponentName: blackEntry.name,
+          result:       res,
+        });
+      }
+      if (blackIsRival) {
+        const res = rr.scoreB === 1 ? 'win' : (rr.scoreB === 0.5 ? 'draw' : 'loss');
+        out.push({
+          rivalId:      blackId,
+          name:         blackEntry.name,
+          opponentId:   whiteId,
+          opponentName: whiteEntry.name,
+          result:       res,
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Build rival field entries for a tournament instance. Committed
+   * rivals (Phase F.4 co-registration) are always included. On top of
+   * that, random eligible rivals fill up to 3 total.
+   */
+  function _buildRivalEntries(t, startDate) {
+    if (typeof RivalSystem === 'undefined' || typeof RivalData === 'undefined') {
+      return [];
+    }
+
+    const committed = startDate && RivalSystem.getCommittedRivalsForTournament
+      ? RivalSystem.getCommittedRivalsForTournament(t.id, startDate)
+      : [];
+    const committedIds = new Set(committed.map((r) => r.id));
+
+    const pool = RivalSystem.getEligibleForTournament(t.eloMin, t.eloMax)
+      .filter((r) => !committedIds.has(r.id));
+
+    // Shuffle the non-committed pool with Fisher-Yates to avoid order bias.
+    const shuffled = pool.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = shuffled[i];
+      shuffled[i] = shuffled[j];
+      shuffled[j] = tmp;
+    }
+
+    const baseTarget = Math.max(1, Math.min(3, 1 + Math.floor(Math.random() * 3)));
+    const finalTarget = Math.min(3, Math.max(committed.length, baseTarget));
+
+    // Always include committed first, then top up from the shuffled pool.
+    const selected = committed.slice();
+    for (const r of shuffled) {
+      if (selected.length >= finalTarget) break;
+      selected.push(r);
+    }
+
+    const out = [];
+    for (const live of selected) {
+      const proto = RivalData.getById(live.id);
+      if (!proto) continue;
+      out.push({
+        id:             live.id,
+        name:           proto.name,
+        elo:            live.elo,
+        nationality:    proto.nationality,
+        isPlayer:       false,
+        isRival:        true,
+        score:          0,
+        opponentsFaced: [],
+      });
+    }
+    return out;
   }
 
   function _addScore(entry, delta) {
@@ -909,6 +1090,23 @@ const TournamentSystem = (() => {
     const paired = new Set();
     const pairings = [];
 
+    // Phase F.4 — soft pairing bias: on the LAST round only, if the
+    // player and a met rival are both in the top 4 with a score gap
+    // of <= 1 point, and neither has faced the other, pair them
+    // preferentially. Swiss integrity is otherwise preserved.
+    const isLastRound = instance.currentRound === instance.rounds;
+    const biasPair = isLastRound ? _findLastRoundRivalBias(sorted) : null;
+    if (biasPair) {
+      const whiteFirst = Math.random() < 0.5;
+      pairings.push(
+        whiteFirst
+          ? { white: biasPair.player, black: biasPair.rival }
+          : { white: biasPair.rival, black: biasPair.player },
+      );
+      paired.add(biasPair.player.id);
+      paired.add(biasPair.rival.id);
+    }
+
     for (let i = 0; i < sorted.length; i++) {
       const a = sorted[i];
       if (paired.has(a.id)) continue;
@@ -949,6 +1147,43 @@ const TournamentSystem = (() => {
     }
 
     return pairings;
+  }
+
+  /**
+   * Find a player-vs-met-rival pairing that satisfies F.4 drama rules.
+   * Returns { player, rival } if valid, else null. Never forces the
+   * choice: the caller uses this only as a preference.
+   */
+  function _findLastRoundRivalBias(sorted) {
+    if (typeof RivalSystem === 'undefined') return null;
+    const top4 = sorted.slice(0, 4);
+    const player = top4.find((p) => p.id === 'player');
+    if (!player) return null;
+
+    const candidates = top4.filter((p) =>
+      p.id !== 'player' &&
+      typeof p.id === 'string' &&
+      p.id.startsWith('rival_') &&
+      Math.abs(p.score - player.score) <= 1 &&
+      !player.opponentsFaced.includes(p.id),
+    );
+    if (candidates.length === 0) return null;
+
+    // Prefer met rivals; if none met, skip (avoid unmet rival override).
+    const met = candidates.filter((c) => {
+      const live = RivalSystem.getById(c.id);
+      return live && live.met;
+    });
+    if (met.length === 0) return null;
+
+    // Closest in score, tiebreak by Elo proximity to player.
+    met.sort((a, b) => {
+      const da = Math.abs(a.score - player.score);
+      const db = Math.abs(b.score - player.score);
+      if (da !== db) return da - db;
+      return Math.abs(a.elo - player.elo) - Math.abs(b.elo - player.elo);
+    });
+    return { player, rival: met[0] };
   }
 
   /**
