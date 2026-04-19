@@ -111,9 +111,18 @@ test('ids are unique', () => {
   }
 });
 
-test('tier is 1 or 2 (Phase C ships those only)', () => {
+test('tiers stay within the shipped 1-6 ladder', () => {
   for (const t of TournamentData.getAll()) {
-    assert(t.tier === 1 || t.tier === 2, `${t.id} has invalid tier ${t.tier}`);
+    assert(t.tier >= 1 && t.tier <= 6, `${t.id} has invalid tier ${t.tier}`);
+  }
+});
+
+test('pairingSystem stays within supported values', () => {
+  for (const t of TournamentData.getAll()) {
+    assert(
+      t.pairingSystem === 'swiss' || t.pairingSystem === 'roundrobin',
+      `${t.id} has unsupported pairingSystem ${t.pairingSystem}`,
+    );
   }
 });
 
@@ -181,10 +190,43 @@ test('getById returns null for unknown id', () => {
 test('getByTier returns the right ones', () => {
   const tier1 = TournamentData.getByTier(1);
   const tier2 = TournamentData.getByTier(2);
+  const tier3 = TournamentData.getByTier(3);
+  const tier4 = TournamentData.getByTier(4);
+  const tier5 = TournamentData.getByTier(5);
+  const tier6 = TournamentData.getByTier(6);
   assert(tier1.length > 0, 'no Tier 1 tournaments');
   assert(tier2.length > 0, 'no Tier 2 tournaments');
+  assert(tier3.length > 0, 'no Tier 3 tournaments');
+  assert(tier4.length > 0, 'no Tier 4 tournaments');
+  assert(tier5.length > 0, 'no Tier 5 tournaments');
+  assert(tier6.length > 0, 'no Tier 6 tournaments');
   for (const t of tier1) assertEq(t.tier, 1);
   for (const t of tier2) assertEq(t.tier, 2);
+  for (const t of tier3) assertEq(t.tier, 3);
+  for (const t of tier4) assertEq(t.tier, 4);
+  for (const t of tier5) assertEq(t.tier, 5);
+  for (const t of tier6) assertEq(t.tier, 6);
+});
+
+test('Tier 1-3 remain swiss and Tier 4-6 are round robin', () => {
+  for (const t of TournamentData.getAll()) {
+    if (t.tier <= 3) {
+      assertEq(t.pairingSystem, 'swiss', `${t.id} should stay swiss`);
+    } else {
+      assertEq(t.pairingSystem, 'roundrobin', `${t.id} should now be round robin`);
+    }
+  }
+});
+
+test('round-robin events use closed-field sizes derived from rounds + 1', () => {
+  for (const t of TournamentData.getAll()) {
+    if (t.pairingSystem !== 'roundrobin') continue;
+    const fieldSize = t.rounds + 1;
+    assert(
+      fieldSize >= 8 && fieldSize <= 14,
+      `${t.id}: round-robin field size ${fieldSize} should stay within 8..14`,
+    );
+  }
 });
 
 test('getByTier(99) returns empty', () => {
@@ -210,10 +252,22 @@ test('getEligible(1500) — mid sees both tiers', () => {
   assert(hasTier2, '1500 should see Tier 2');
 });
 
-test('getEligible(2500) — too strong for Tier 1/2', () => {
+test('getEligible(2500) — high-level player now sees higher-tier events', () => {
   const elig = TournamentData.getEligible(2500);
-  // Past the eloMax of every Tier 1/2 event
-  assertEq(elig.length, 0, 'no Tier 1/2 should fit a 2500 player');
+  assert(elig.length > 0, '2500 should see higher-tier events');
+  assert(elig.some((t) => t.tier >= 4), '2500 should reach at least Tier 4');
+});
+
+test('new elite catalogue includes the expected Tier 3-6 anchors', () => {
+  const ids = [
+    'gibraltar_masters',
+    'tata_steel_challengers',
+    'tata_steel_masters',
+    'grand_swiss',
+  ];
+  for (const id of ids) {
+    assert(TournamentData.getById(id), `${id} should exist in the Phase G catalogue`);
+  }
 });
 
 console.log('\n── Prize pool ──');

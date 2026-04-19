@@ -141,6 +141,31 @@ const RivalSystem = (() => {
     return _clampDrift(rival, raw);
   }
 
+  function _titleForElo(elo) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.titleForElo) {
+      return CareerManager.titleForElo(elo);
+    }
+    if (elo >= 2500) return 'GM';
+    if (elo >= 2400) return 'IM';
+    if (elo >= 2300) return 'FM';
+    if (elo >= 2200) return 'CM';
+    return null;
+  }
+
+  function _snapshotRival(rival) {
+    return {
+      ...JSON.parse(JSON.stringify(rival)),
+      title: _titleForElo(rival.elo),
+    };
+  }
+
+  function _formatName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitledName) {
+      return CareerManager.formatTitledName(name, title);
+    }
+    return title ? `${title} ${name}` : name;
+  }
+
   function _pushRecentForm(rival, tag) {
     rival.recentForm.push(tag);
     if (rival.recentForm.length > 10) rival.recentForm.shift();
@@ -176,13 +201,13 @@ const RivalSystem = (() => {
 
     /** @returns {Array} a deep copy of the live rivals array. */
     getAll() {
-      return _state().rivals.map((r) => JSON.parse(JSON.stringify(r)));
+      return _state().rivals.map((r) => _snapshotRival(r));
     },
 
     /** @param {string} id */
     getById(id) {
       const live = _findRival(id);
-      return live ? JSON.parse(JSON.stringify(live)) : null;
+      return live ? _snapshotRival(live) : null;
     },
 
     /**
@@ -197,7 +222,7 @@ const RivalSystem = (() => {
         if (da !== db) return da - db;
         return a.id < b.id ? -1 : 1;
       });
-      return rivals.slice(0, Math.max(0, n | 0));
+      return rivals.slice(0, Math.max(0, n | 0)).map((r) => _snapshotRival(r));
     },
 
     /**
@@ -209,7 +234,8 @@ const RivalSystem = (() => {
       return _state().rivals
         .filter((r) => r.elo >= eloMin && r.elo <= eloMax)
         .slice()
-        .sort((a, b) => (a.id < b.id ? -1 : 1));
+        .sort((a, b) => (a.id < b.id ? -1 : 1))
+        .map((r) => _snapshotRival(r));
     },
 
     /**
@@ -372,7 +398,7 @@ const RivalSystem = (() => {
           c.startDate &&
           _compareDates(c.startDate, startDate) === 0,
         );
-        if (hit) out.push(JSON.parse(JSON.stringify(r)));
+        if (hit) out.push(_snapshotRival(r));
       }
       return out;
     },
@@ -459,7 +485,9 @@ const RivalSystem = (() => {
 
           if (beforeStart && typeof InboxSystem !== 'undefined') {
             const proto = RivalData.getById(r.id);
-            const rivalName = proto ? proto.name : 'A rival';
+            const rivalName = proto
+              ? _formatName(proto.name, _titleForElo(r.elo))
+              : 'A rival';
             const text = _provocationText(r);
             InboxSystem.push('rival_provocation_before_tournament', {
               rivalName,

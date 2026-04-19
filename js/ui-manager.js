@@ -19,8 +19,10 @@ const UIManager = {
   _aiThinking:        false,
   _opponentName:      null,
   _opponentElo:       null,
+  _opponentTitle:     null,
   _opponentId:        null,
   _opponentNationality: null,
+  _opponentChampion:  null,
 
   // Stockfish visuals
   sfArrow: null, // N3 arrow { from, to }
@@ -42,6 +44,12 @@ const UIManager = {
   _pieceSource: 'live',
   _puzzleMode: false,
   _playbackInputLocked: false,
+  _gameActive: false,
+  _gameConcluded: false,
+  _aiLostStreakCount: 0,
+  _aiDrawEqualStreak: 0,
+  _aiLastDrawOfferPly: -Infinity,
+  _playerLastDrawOfferPly: -Infinity,
 
   // Callback fired when a game ends. External code (career flow) can
   // subscribe by setting UIManager.onGameEnd = (result) => {...}.
@@ -80,13 +88,60 @@ const UIManager = {
 
   /**
    * Set the AI opponent for the next game.
-   * @param {{ name: string, elo: number, id?: string, nationality?: string }} opponent
+   * @param {{ name: string, elo: number, title?: string | null, id?: string, nationality?: string, champion?: object | null }} opponent
    */
   setOpponent(opponent) {
     this._opponentName        = opponent.name;
     this._opponentElo         = opponent.elo;
+    this._opponentTitle       = opponent.title || null;
     this._opponentId          = opponent.id || null;
     this._opponentNationality = opponent.nationality || null;
+    this._opponentTier        = Number.isFinite(opponent.tier) ? opponent.tier : null;
+    this._opponentChampion    = opponent.champion || null;
+  },
+
+  _formatName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatName) {
+      return CareerManager.formatName(name, title);
+    }
+    return (name || '').trim();
+  },
+
+  _formatTitledName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitledName) {
+      return CareerManager.formatTitledName(name, title);
+    }
+    const safeName = this._formatName(name, title);
+    return title ? `${title} ${safeName}` : safeName;
+  },
+
+  _formatTitleBadgeHTML(title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitleBadgeHTML) {
+      return CareerManager.formatTitleBadgeHTML(title);
+    }
+    return title ? `<span class="title-badge title-${String(title).toLowerCase()}">${title}</span>` : '';
+  },
+
+  _escapeHTML(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  _formatNameHTML(name, title) {
+    const badgeHTML = this._formatTitleBadgeHTML(title);
+    const safeName = this._escapeHTML(this._formatName(name, title));
+    if (!safeName) return badgeHTML || '';
+    return badgeHTML ? `${badgeHTML} ${safeName}` : safeName;
+  },
+
+  _formatFlaggedNameHTML(name, title, nationality) {
+    const flag = this._flagFor(nationality);
+    const label = this._formatNameHTML(name, title);
+    return flag ? `${flag} ${label}` : label;
   },
 
   /** Show the game screen. */
@@ -320,6 +375,150 @@ const UIManager = {
     }
   },
 
+  _syncGameActionButtons() {
+    const resignBtn = document.getElementById('btn-resign');
+    const drawBtn = document.getElementById('btn-offer-draw');
+    if (!resignBtn && !drawBtn) return;
+
+    const playbackActive = typeof BonusSystem !== 'undefined'
+      && BonusSystem.isPlaybackActive
+      && BonusSystem.isPlaybackActive();
+    const disabled = !this._gameActive
+      || this._gameConcluded
+      || this._puzzleMode
+      || this._playbackInputLocked
+      || playbackActive;
+
+    const inTournament = typeof CareerFlow !== 'undefined'
+      && CareerFlow.getMode
+      && CareerFlow.getMode() === 'tournament';
+    if (resignBtn) {
+      resignBtn.disabled = Boolean(disabled);
+      resignBtn.classList.toggle('hidden', inTournament && !this._gameActive);
+    }
+    if (drawBtn) {
+      drawBtn.disabled = Boolean(disabled || this._aiThinking);
+      drawBtn.classList.toggle('hidden', inTournament && !this._gameActive);
+    }
+  },
+
+  _isResignAvailable() {
+    const playbackActive = typeof BonusSystem !== 'undefined'
+      && BonusSystem.isPlaybackActive
+      && BonusSystem.isPlaybackActive();
+    return this._gameActive
+      && !this._gameConcluded
+      && !this._puzzleMode
+      && !this._playbackInputLocked
+      && !playbackActive;
+  },
+
+  _isDrawOfferAvailable() {
+    const playbackActive = typeof BonusSystem !== 'undefined'
+      && BonusSystem.isPlaybackActive
+      && BonusSystem.isPlaybackActive();
+    return this._gameActive
+      && !this._gameConcluded
+      && !this._puzzleMode
+      && !this._playbackInputLocked
+      && !playbackActive
+      && !this._aiThinking;
+  },
+
+  _clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  },
+
+  _getBoardPieceCount() {
+    const board = ChessEngine.getBoard ? ChessEngine.getBoard() : [];
+    let count = 0;
+    for (const row of board) {
+      for (const cell of row) {
+        if (cell) count += 1;
+      }
+    }
+    return count;
+  },
+
+  _getOpponentEvalCp() {
+    if (ChessEngine.getLastEvalCp) {
+      return ChessEngine.getLastEvalCp();
+    }
+    return null;
+  },
+
+  _getPlayerDrawOfferDecision({ pieces, evalCp, playerElo, oppElo }) {
+    if (pieces >= 24) {
+      return {
+        accepted: false,
+        automatic: true,
+        probability: 0,
+        status: 'Too early to offer a draw.',
+      };
+    }
+
+    const baseProbability = pieces <= 15 ? 0.40 : 0.15;
+
+    let evalAdjust = 0;
+    if (Number.isFinite(evalCp)) {
+      if (evalCp > 100) evalAdjust = -0.40;
+      else if (evalCp >= 50) evalAdjust = -0.10;
+      else if (evalCp <= -100) evalAdjust = +0.30;
+      else if (evalCp <= -50) evalAdjust = +0.10;
+    }
+
+    const eloAdjust = this._clamp(((playerElo || 0) - (oppElo || 0)) / 400, -0.3, 0.3);
+    const probability = this._clamp(baseProbability + evalAdjust + eloAdjust, 0, 0.95);
+    const accepted = Math.random() < probability;
+
+    return {
+      accepted,
+      automatic: false,
+      probability,
+      status: accepted
+        ? 'Draw agreed.'
+        : 'Your opponent declines the draw offer.',
+    };
+  },
+
+  _checkAIDrawOffer(evalCp) {
+    if (!this._gameActive || this._gameConcluded) return false;
+    if (typeof BonusSystem !== 'undefined' &&
+        BonusSystem.isPlaybackActive &&
+        BonusSystem.isPlaybackActive()) {
+      return false;
+    }
+
+    const pieces = this._getBoardPieceCount();
+    if (!Number.isFinite(evalCp) || pieces > 20 || evalCp < -80 || evalCp > 80) {
+      this._aiDrawEqualStreak = 0;
+      return false;
+    }
+
+    this._aiDrawEqualStreak += 1;
+    if (this._aiDrawEqualStreak < 8) return false;
+
+    const ply = ChessEngine.getHistory().length;
+    if (ply - this._aiLastDrawOfferPly < 15) return false;
+
+    const player = CareerManager.hasCharacter && CareerManager.hasCharacter()
+      ? CareerManager.player.get()
+      : null;
+    const playerElo = player ? player.elo : 800;
+    const oppElo = this._opponentElo || 800;
+    const eloOfferBoost = this._clamp((playerElo - oppElo) / 400, 0, 0.15);
+    const probability = 0.15 + eloOfferBoost;
+    if (Math.random() >= probability) return false;
+
+    this._aiLastDrawOfferPly = ply;
+    const body = document.getElementById('draw-offer-body');
+    if (body) body.textContent = 'Your opponent offers a draw.';
+    const modal = document.getElementById('modal-draw-offer');
+    if (modal && modal.showModal) modal.showModal();
+    this.showStatus('Your opponent offers a draw.');
+    return true;
+  },
+
   updateMoveHistory() {
     const history     = ChessEngine.getHistory();
     const list        = document.getElementById('moves-list');
@@ -391,6 +590,7 @@ const UIManager = {
     if (this._viewPly !== null) return;     // view mode: read-only
     if (this._playbackInputLocked) return;
     if (ChessEngine.isGameOver()) return;
+    if (this._gameConcluded) return;
     if (this._aiThinking) return;
     if (ChessEngine.getTurn() !== ChessEngine.getPlayerColor()) return;
 
@@ -486,6 +686,12 @@ const UIManager = {
     this._pieceSource     = 'live';
     this._puzzleMode      = false;
     this._playbackInputLocked = false;
+    this._gameActive      = true;
+    this._gameConcluded   = false;
+    this._aiLostStreakCount = 0;
+    this._aiDrawEqualStreak = 0;
+    this._aiLastDrawOfferPly = -Infinity;
+    this._playerLastDrawOfferPly = -Infinity;
 
     FocusSystem.resetForGame();
     if (typeof PuzzleSystem !== 'undefined' && PuzzleSystem.resetTrainingBonusesForGame) {
@@ -496,14 +702,21 @@ const UIManager = {
     if (!this._opponentName) {
       this._opponentName        = 'Test Opponent';
       this._opponentElo         = 800;
+      this._opponentTitle       = null;
       this._opponentId          = null;
       this._opponentNationality = null;
+      this._opponentTier        = null;
+      this._opponentChampion    = null;
     }
 
     const player = CareerManager.hasCharacter() ? CareerManager.player.get() : null;
 
     const pNameEl = document.getElementById('player-name-label');
-    if (pNameEl) pNameEl.textContent = player ? (player.playerName || 'You') : 'You';
+    if (pNameEl) {
+      pNameEl.innerHTML = player
+        ? this._formatNameHTML(player.playerName || 'You', player.title || null)
+        : 'You';
+    }
     document.getElementById('player-elo').textContent = player ? player.elo : 800;
 
     const pAvatar = document.getElementById('player-avatar-slot');
@@ -514,10 +727,19 @@ const UIManager = {
     document.getElementById('opponent-elo').textContent = this._opponentElo;
     const oppNameEl = document.getElementById('opponent-name');
     if (oppNameEl) {
-      const flag = this._flagFor(this._opponentNationality);
-      oppNameEl.textContent = flag
-        ? `${flag} ${this._opponentName}`
-        : this._opponentName;
+      oppNameEl.innerHTML = this._formatFlaggedNameHTML(
+        this._opponentName,
+        this._opponentTitle,
+        this._opponentNationality,
+      );
+    }
+    const oppTagEl = document.getElementById('opponent-tagline');
+    if (oppTagEl) {
+      const tagline = this._opponentChampion && this._opponentChampion.tagline
+        ? this._opponentChampion.tagline
+        : '';
+      oppTagEl.textContent = tagline;
+      oppTagEl.classList.toggle('hidden', !tagline);
     }
 
     const oAvatar = document.getElementById('opponent-avatar-slot');
@@ -538,6 +760,7 @@ const UIManager = {
       BonusSystem.renderInventory();
     }
 
+    this._syncGameActionButtons();
     this.renderBoard();
 
     if (playerColor === 'b') {
@@ -624,6 +847,13 @@ const UIManager = {
       else if (!won && resultKey === 'loss')  SoundManager.playDefeat();
     }
 
+    this._gameActive = false;
+    this._gameConcluded = true;
+    this._aiThinking = false;
+    this._aiLostStreakCount = 0;
+    this._aiDrawEqualStreak = 0;
+    this._syncGameActionButtons();
+
     FocusSystem.onGameEnd(won);
     CareerManager.focus.sync();
 
@@ -654,6 +884,115 @@ const UIManager = {
     }
 
     return true;
+  },
+
+  _endGameByResignation(resultKey, statusMessage) {
+    if (!this._gameActive || this._gameConcluded) return false;
+
+    const won = resultKey === 'win';
+    const msg = statusMessage || (
+      resultKey === 'loss'
+        ? 'You resigned.'
+        : resultKey === 'win'
+          ? 'Your opponent resigns.'
+          : 'Draw agreed.'
+    );
+
+    this._gameActive = false;
+    this._gameConcluded = true;
+    this._aiThinking = false;
+    this._aiLostStreakCount = 0;
+    this._aiDrawEqualStreak = 0;
+    this.selectedSquare = null;
+    this.legalMoves = [];
+    this._syncGameActionButtons();
+    this.renderBoard();
+
+    if (typeof SoundManager !== 'undefined') {
+      if (resultKey === 'win') SoundManager.playVictory();
+      else if (resultKey === 'loss') SoundManager.playDefeat();
+    }
+
+    FocusSystem.onGameEnd(won);
+    CareerManager.focus.sync();
+
+    if (this._opponentName) {
+      CareerManager.history.recordGame({
+        opponentName: this._opponentName,
+        opponentElo:  this._opponentElo,
+        result:       resultKey,
+        moves:        ChessEngine.getHistory().length,
+      });
+    }
+
+    this.showStatus(msg);
+
+    if (typeof this.onGameEnd === 'function') {
+      try {
+        this.onGameEnd(resultKey);
+      } catch (e) {
+        console.error('[UIManager] onGameEnd callback error:', e);
+      }
+    }
+
+    return true;
+  },
+
+  _checkAIResignation(evalCp) {
+    if (!Number.isFinite(evalCp)) {
+      this._aiLostStreakCount = 0;
+      return false;
+    }
+    if (typeof BonusSystem !== 'undefined' &&
+        BonusSystem.isPlaybackActive &&
+        BonusSystem.isPlaybackActive()) {
+      return false;
+    }
+
+    if (evalCp <= -600) {
+      this._aiLostStreakCount += 1;
+    } else {
+      this._aiLostStreakCount = 0;
+      return false;
+    }
+
+    if (this._aiLostStreakCount < 5) return false;
+
+    let probability = 0.30;
+    if (evalCp <= -1000) probability = 0.90;
+    else if (evalCp <= -800) probability = 0.60;
+
+    if (Math.random() >= probability) return false;
+    return this._endGameByResignation('win', 'Your opponent resigns.');
+  },
+
+  _onOfferDraw() {
+    if (!this._isDrawOfferAvailable()) return false;
+
+    const ply = ChessEngine.getHistory().length;
+    if (ply - this._playerLastDrawOfferPly < 5) {
+      this.showStatus('You cannot offer another draw yet.');
+      return false;
+    }
+    this._playerLastDrawOfferPly = ply;
+
+    const player = CareerManager.hasCharacter && CareerManager.hasCharacter()
+      ? CareerManager.player.get()
+      : null;
+    const playerElo = player ? player.elo : 800;
+    const decision = this._getPlayerDrawOfferDecision({
+      pieces: this._getBoardPieceCount(),
+      evalCp: this._getOpponentEvalCp(),
+      playerElo,
+      oppElo: this._opponentElo || 800,
+    });
+
+    if (decision.accepted) {
+      this._endGameByResignation('draw', 'Draw agreed.');
+    } else {
+      this.showStatus(decision.status);
+    }
+    return decision.accepted;
   },
 
   // ── STOCKFISH VISUALS ────────────────────────────────────────
@@ -1006,24 +1345,87 @@ const UIManager = {
 
   // ── AI MOVE ─────────────────────────────────────────────────
 
+  /**
+   * Phase G.2 — route opponent move generation between Maia and the
+   * shared humanized Stockfish wrapper.
+   *
+   * Rule:
+   *   - targetElo <= 2000 → Maia (book in opening, then policy move)
+   *   - targetElo > 2000  → StockfishOpponent
+   *
+   * @param {string} fen
+   * @param {number} targetElo
+   * @param {number} playerElo
+   * @returns {Promise<string|null>} chosen UCI move
+   */
+  async _pickOpponentMove(fen, targetElo, playerElo) {
+    const plyCount = ChessEngine.getHistory().length;
+    const repMove = this._pickChampionOpeningMove(plyCount);
+    if (repMove) return repMove;
+
+    if (targetElo > 2000) {
+      if (typeof StockfishOpponent === 'undefined' || !StockfishOpponent.getMove) {
+        throw new Error('Stockfish opponent module unavailable');
+      }
+      const result = await StockfishOpponent.getMove(fen, targetElo);
+      return result && result.move ? result.move : null;
+    }
+
+    let move = null;
+    if (plyCount < 12) {
+      const bookMove = await MaiaEngine.getOpeningMove(fen, targetElo);
+      if (bookMove) move = bookMove;
+    }
+    if (!move) {
+      const result = await MaiaEngine.getMove(fen, targetElo, playerElo);
+      move = result && result.move ? result.move : null;
+    }
+    return move;
+  },
+
+  _pickChampionOpeningMove(plyCount) {
+    const champion = this._opponentChampion;
+    const rep = champion && champion.openingRepertoire;
+    if (!rep) return null;
+
+    const threshold = Number.isFinite(rep.prob) ? rep.prob : 0.70;
+    if (Math.random() >= threshold) return null;
+
+    let preferred = null;
+    if (plyCount === 0 && Array.isArray(rep.asWhite) && rep.asWhite.length > 0) {
+      preferred = rep.asWhite[0];
+    } else if (plyCount === 1) {
+      const firstMove = ChessEngine.getHistory()[0];
+      if (firstMove === 'e4') preferred = rep.vsE4 || null;
+      else if (firstMove === 'd4') preferred = rep.vsD4 || null;
+    }
+
+    if (!preferred) return null;
+
+    const preferredMoves = Array.isArray(preferred) ? preferred : [preferred];
+    const legalMoves = ChessEngine.getLegalMoves()
+      .map((m) => `${m.from}${m.to}${m.promotion || ''}`);
+
+    for (const move of preferredMoves) {
+      if (legalMoves.includes(move)) return move;
+    }
+    return null;
+  },
+
   async _triggerAIMove() {
     this._aiThinking = true;
+    this._syncGameActionButtons();
     this.showStatus('Opponent thinking…');
 
     try {
       const fen       = ChessEngine.getFEN();
       const player    = CareerManager.hasCharacter() ? CareerManager.player.get() : null;
       const playerElo = player ? player.elo : 800;
+      const targetElo = this._opponentElo;
 
-      let move = null;
-      const plyCount = ChessEngine.getHistory().length;
-      if (plyCount < 12) {
-        const bookMove = await MaiaEngine.getOpeningMove(fen, this._opponentElo);
-        if (bookMove) move = bookMove;
-      }
+      const move = await this._pickOpponentMove(fen, targetElo, playerElo);
       if (!move) {
-        const result = await MaiaEngine.getMove(fen, this._opponentElo, playerElo);
-        move = result.move;
+        throw new Error('No opponent move produced');
       }
 
       if (ChessEngine.isGameOver() || ChessEngine.getFEN() !== fen) {
@@ -1037,7 +1439,7 @@ const UIManager = {
 
       const moveResult = ChessEngine.makeMove(from, to, promo);
       if (!moveResult) {
-        console.error('[AI] Illegal move from Maia:', move);
+        console.error('[AI] Illegal move from opponent engine:', move);
         this._aiThinking = false;
         return;
       }
@@ -1063,14 +1465,19 @@ const UIManager = {
       this._pieceSource = 'live';
       this.lastMove = { from, to };
       this._aiThinking = false;
+      this._syncGameActionButtons();
       this.renderBoard();
       this.updateMoveHistory();
 
       if (this._checkGameEnd()) return;
+      const aiEvalCp = ChessEngine.getLastEvalCp ? ChessEngine.getLastEvalCp() : null;
+      if (this._checkAIResignation(aiEvalCp)) return;
+      if (this._checkAIDrawOffer(aiEvalCp)) return;
       this.showStatus('Your move.');
     } catch (e) {
       console.error('[AI] Error:', e);
       this._aiThinking = false;
+      this._syncGameActionButtons();
       this.showStatus('AI error — start a new game.');
     }
   },
@@ -1085,6 +1492,7 @@ const UIManager = {
       MA: '🇲🇦', NL: '🇳🇱', NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱',
       RO: '🇷🇴', RU: '🇷🇺', RS: '🇷🇸', ES: '🇪🇸', SE: '🇸🇪', CH: '🇨🇭',
       TR: '🇹🇷', UA: '🇺🇦', GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳',
+      IS: '🇮🇸', SG: '🇸🇬',
     };
     return flags[code] || '';
   },
@@ -1180,6 +1588,49 @@ const UIManager = {
       };
     }
 
+    const btnResign = document.getElementById('btn-resign');
+    const btnOfferDraw = document.getElementById('btn-offer-draw');
+    const resignModal = document.getElementById('modal-resign');
+    const btnResignCancel = document.getElementById('btn-resign-cancel');
+    const btnResignConfirm = document.getElementById('btn-resign-confirm');
+    const drawOfferModal = document.getElementById('modal-draw-offer');
+    const btnDrawOfferAccept = document.getElementById('btn-draw-offer-accept');
+    const btnDrawOfferDecline = document.getElementById('btn-draw-offer-decline');
+    if (btnOfferDraw) {
+      btnOfferDraw.onclick = () => this._onOfferDraw();
+    }
+    if (btnResign) {
+      btnResign.onclick = () => {
+        if (!this._isResignAvailable()) return;
+        if (resignModal && resignModal.showModal) resignModal.showModal();
+      };
+    }
+    if (btnResignCancel) {
+      btnResignCancel.onclick = () => {
+        if (resignModal && resignModal.close) resignModal.close();
+      };
+    }
+    if (btnResignConfirm) {
+      btnResignConfirm.onclick = () => {
+        if (resignModal && resignModal.close) resignModal.close();
+        if (!this._isResignAvailable()) return;
+        this._endGameByResignation('loss', 'You resigned.');
+      };
+    }
+    if (btnDrawOfferAccept) {
+      btnDrawOfferAccept.onclick = () => {
+        if (drawOfferModal && drawOfferModal.close) drawOfferModal.close();
+        if (!this._gameActive || this._gameConcluded) return;
+        this._endGameByResignation('draw', 'Draw agreed.');
+      };
+    }
+    if (btnDrawOfferDecline) {
+      btnDrawOfferDecline.onclick = () => {
+        if (drawOfferModal && drawOfferModal.close) drawOfferModal.close();
+        this.showStatus('You decline the draw offer.');
+      };
+    }
+
     // Post-game review: close → sync focus
     const btnCloseReview = document.getElementById('btn-close-review');
     if (btnCloseReview) {
@@ -1198,6 +1649,8 @@ const UIManager = {
     if (navPrev)  navPrev.onclick  = () => this._navPrev();
     if (navNext)  navNext.onclick  = () => this._navNext();
     if (navLive)  navLive.onclick  = () => this._navLive();
+
+    this._syncGameActionButtons();
   },
 
   enterPuzzleMode() {
@@ -1206,6 +1659,7 @@ const UIManager = {
     this.selectedSquare = null;
     this.legalMoves = [];
     this._clearStockfishVisuals();
+    this._syncGameActionButtons();
     this.renderBoard();
   },
 
@@ -1214,6 +1668,7 @@ const UIManager = {
     this._pieceSource = this._viewPly === null ? 'live' : 'viewPly';
     this.selectedSquare = null;
     this.legalMoves = [];
+    this._syncGameActionButtons();
     this.renderBoard();
   },
 
@@ -1222,6 +1677,7 @@ const UIManager = {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.add('playback-locked');
     }
+    this._syncGameActionButtons();
   },
 
   unlockInputAfterPlayback() {
@@ -1229,6 +1685,7 @@ const UIManager = {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.remove('playback-locked');
     }
+    this._syncGameActionButtons();
     this.renderBoard();
   },
 

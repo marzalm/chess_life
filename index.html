@@ -112,6 +112,7 @@
           <label class="cc-radio"><input type="radio" name="cc-gender" value="F"> F</label>
           <label class="cc-radio"><input type="radio" name="cc-gender" value="X"> X</label>
         </div>
+
       </div>
 
       <p id="cc-error" class="cc-error hidden">—</p>
@@ -185,6 +186,7 @@
     <!-- Dev / test row (will shrink as Phase C/D/E ship real features) -->
     <div class="career-dev-row">
       <button id="btn-play-test-game" class="career-dev-btn">▶ Play test game</button>
+      <button id="btn-dev-panel" class="career-dev-btn">🛠 Dev panel</button>
       <button id="btn-reset-career" class="career-dev-btn">↺ Reset career</button>
     </div>
 
@@ -377,6 +379,7 @@
           <div class="t-pairing-side">
             <div class="t-pairing-label">Opponent</div>
             <div id="t-opp-name" class="t-pairing-name">—</div>
+            <div id="t-opp-tagline" class="t-pairing-tagline hidden">—</div>
             <div id="t-opp-elo"  class="t-pairing-elo">—</div>
           </div>
         </div>
@@ -441,6 +444,7 @@
           <div class="game-id-text">
             <div class="label">Opponent</div>
             <div id="opponent-name" class="game-id-name">—</div>
+            <div id="opponent-tagline" class="game-id-tagline hidden">—</div>
             <div id="opponent-elo">—</div>
           </div>
         </div>
@@ -476,6 +480,8 @@
         </div>
         <div id="game-controls">
           <button id="btn-new-game">New game</button>
+          <button id="btn-offer-draw" class="game-draw-btn" type="button">Offer Draw</button>
+          <button id="btn-resign" class="game-danger-btn" type="button">Resign</button>
           <div id="game-status">Start a game to begin.</div>
         </div>
       </div>
@@ -572,6 +578,96 @@
     </div>
   </dialog>
 
+  <dialog id="modal-resign" class="modal">
+    <div class="modal-box bg-base-200 border border-primary/30 text-center" style="max-width:360px;">
+      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;color:#e8c98a;">
+        Resign game?
+      </h3>
+      <p style="font-family:'Press Start 2P',monospace;font-size:8px;line-height:1.8;">
+        This rated game will count as a loss.
+      </p>
+      <div class="modal-action justify-center">
+        <button id="btn-resign-cancel" class="btn" type="button">Cancel</button>
+        <button id="btn-resign-confirm" class="btn btn-error" type="button">Confirm</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="modal-draw-offer" class="modal">
+    <div class="modal-box bg-base-200 border border-primary/30 text-center" style="max-width:380px;">
+      <h3 class="font-bold mb-4" style="font-family:'Press Start 2P',monospace;font-size:11px;color:#e8c98a;">
+        Draw offer
+      </h3>
+      <p id="draw-offer-body" style="font-family:'Press Start 2P',monospace;font-size:8px;line-height:1.8;">
+        Your opponent offers a draw.
+      </p>
+      <div class="modal-action justify-center">
+        <button id="btn-draw-offer-decline" class="btn" type="button">Decline</button>
+        <button id="btn-draw-offer-accept" class="btn btn-primary" type="button">Accept</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MODAL: DEV PANEL (G.1 / G.2 quick-test tool)
+  ══════════════════════════════════════════════════════════════ -->
+  <dialog id="modal-dev-panel" class="modal">
+    <div class="modal-box bg-base-200 border border-primary/30" style="max-width:520px;">
+      <h3 class="dev-panel-title">🛠 Dev quick game</h3>
+
+      <div class="dev-panel-presets">
+        <span class="dev-panel-presets-label">Presets:</span>
+        <button id="btn-dev-preset-maia_low"        class="dev-panel-preset-btn" type="button">Maia low</button>
+        <button id="btn-dev-preset-maia_ceiling"    class="dev-panel-preset-btn" type="button">Maia ceiling</button>
+        <button id="btn-dev-preset-stockfish_elite" class="dev-panel-preset-btn" type="button">Stockfish elite</button>
+      </div>
+
+      <div class="dev-panel-grid">
+        <label class="dev-panel-field">
+          <span>Player Elo</span>
+          <input id="dev-player-elo" type="number" min="100" max="3200" value="800">
+        </label>
+        <label class="dev-panel-field">
+          <span>Opponent Elo</span>
+          <input id="dev-opp-elo" type="number" min="100" max="3200" value="1200">
+        </label>
+        <label class="dev-panel-field">
+          <span>Tier</span>
+          <select id="dev-tier">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+        </label>
+        <label class="dev-panel-field">
+          <span>Color</span>
+          <select id="dev-color">
+            <option value="w" selected>White</option>
+            <option value="b">Black</option>
+            <option value="rand">Random</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="dev-panel-grants">
+        <span class="dev-panel-grants-label">Grant on launch:</span>
+        <label class="dev-panel-check"><input type="checkbox" id="dev-grant-flow"> Flow bonus</label>
+        <label class="dev-panel-check"><input type="checkbox" id="dev-grant-training"> Training bonus</label>
+      </div>
+
+      <div id="dev-preview" class="dev-panel-preview">—</div>
+
+      <div class="dev-panel-actions">
+        <button id="btn-dev-restore-real" class="dev-panel-btn-secondary" type="button">Restore real career</button>
+        <button id="btn-dev-close"       class="dev-panel-btn-secondary" type="button">Cancel</button>
+        <button id="btn-dev-play"        class="dev-panel-btn-primary"   type="button">🎮 Play</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ══════════════════════════════════════════════════════════════
        MODAL: POST-GAME REVIEW
   ══════════════════════════════════════════════════════════════ -->
@@ -631,6 +727,7 @@
   <script src="js/tournament-data.js"></script>
   <script src="js/name-pools.js"></script>
   <script src="js/rival-data.js"></script>
+  <script src="js/champion-data.js"></script>
   <script src="js/rival-system.js"></script>
   <script src="js/tournament-system.js"></script>
   <script src="js/career-flow.js"></script>
@@ -640,11 +737,13 @@
   <script src="js/dialog-system.js"></script>
   <script src="js/chess-engine.js"></script>
   <script src="js/maia-engine.js"></script>
+  <script src="js/stockfish-opponent.js"></script>
   <script src="js/review-manager.js"></script>
   <script src="js/ui-manager.js"></script>
   <script src="js/bonus-system.js"></script>
   <script src="js/ui-career.js"></script>
   <script src="js/character-creator.js"></script>
+  <script src="js/dev-tools.js"></script>
 
 </body>
 </html>

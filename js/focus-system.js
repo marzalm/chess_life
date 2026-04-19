@@ -167,32 +167,54 @@ const FocusSystem = {
    */
   FLOW_THRESHOLDS: { 1: 3, 2: 5, 3: 7, 4: 10 },
 
-  // ── SEUILS ADAPTATIFS PAR ELO ─────────────────────────────────
+  // ── SEUIL DE BASE DES "BONS COUPS" ────────────────────────────
 
   /**
-   * Retourne le seuil "bon coup" de base en centipawns selon l'Elo du joueur.
-   * Données basées sur les ACPL moyens observés par tranche de rating.
-   * Sources : 33rdsquare.com, chess.com, lichess.org
+   * Retourne le seuil "bon coup" de base en centipawns.
+   * Le seuil de base est désormais fixe; la vraie difficulté
+   * supplémentaire vient de l'écart Elo avec l'adversaire courant
+   * (_getGapPenalty) et du tightening Flow.
    */
   _getBaseThreshold() {
-    const elo = this._getPlayerElo();
-    if (elo < 1000) return 90;
-    if (elo < 1200) return 75;
-    if (elo < 1400) return 60;
-    if (elo < 1600) return 50;
-    if (elo < 1800) return 40;
-    return 30;
+    return 80;
   },
 
   /**
-   * Retourne le seuil "bon coup" effectif, incluant le tightening du palier Flow actuel.
+   * Gap-based threshold reduction. When the opponent is stronger, the
+   * positions they create are harder to navigate — finding a "good" move
+   * becomes objectively more difficult. This penalty:
+   *   - only applies when the opponent is stronger (gap > 0)
+   *   - scales linearly with the gap
+   *   - hits harder at high Elo (a 1800 vs 2200 gap matters more than
+   *     an 800 vs 1200 gap — at low Elo the base threshold is already
+   *     generous, and position complexity is lower)
+   *
+   * Formula: penalty_cp = (gap / 1000) * (10 + 20 * eloScale)
+   *   eloScale = clamp((playerElo - 800) / 1200, 0, 1)
+   *   → at 800 Elo:  up to 10 cp penalty per 1000 gap
+   *   → at 2000 Elo: up to 30 cp penalty per 1000 gap
+   */
+  _getGapPenalty() {
+    const playerElo = this._getPlayerElo();
+    const oppElo = this._getOpponentElo();
+    const gap = oppElo - playerElo;
+    if (gap <= 0) return 0;
+    const eloScale = Math.max(0, Math.min(1, (playerElo - 800) / 1200));
+    const penaltyPerK = 10 + 20 * eloScale;
+    return Math.round((gap / 1000) * penaltyPerK);
+  },
+
+  /**
+   * Retourne le seuil "bon coup" effectif, incluant le tightening du palier Flow actuel
+   * et la réduction par écart d'Elo avec l'adversaire.
    * @returns {number} seuil en cp (un coup en dessous = bon coup)
    */
   _getGoodMoveThreshold() {
-    const base = this._getBaseThreshold();
-    if (this.flowPalier === 0) return base;
-    const tightening = this.FLOW_CONFIG[this.flowPalier].tightening;
-    return Math.max(15, base - tightening);
+    let threshold = this._getBaseThreshold() - this._getGapPenalty();
+    if (this.flowPalier > 0) {
+      threshold -= this.FLOW_CONFIG[this.flowPalier].tightening;
+    }
+    return Math.max(15, threshold);
   },
 
   _getPlayerElo() {
@@ -200,6 +222,13 @@ const FocusSystem = {
       return CareerManager.player.get().elo;
     }
     return 800;
+  },
+
+  _getOpponentElo() {
+    if (typeof UIManager !== 'undefined' && Number.isFinite(UIManager._opponentElo)) {
+      return UIManager._opponentElo;
+    }
+    return this._getPlayerElo();
   },
 
   // ── CAPTURE MICRO-REGEN ───────────────────────────────────────

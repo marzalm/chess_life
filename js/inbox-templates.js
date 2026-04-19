@@ -36,6 +36,14 @@ const InboxTemplates = {
     tag:     'federation',
   },
 
+  title_earned: {
+    from:    'FIDE Office',
+    subject: 'Title awarded: {{title}}',
+    body:
+      'Congratulations — you have been awarded the title of {{titleFull}}! This is a permanent recognition of your strength.',
+    tag:     'federation',
+  },
+
   inbox_coach_hired: {
     from: 'Career Office',
     subject: '{{coachName}} joins your team',
@@ -86,6 +94,14 @@ const InboxTemplates = {
     body:
       '{{provocationText}}',
     tag:     'rival',
+  },
+
+  champion_in_field: {
+    from:    'Tournament Desk',
+    subject: 'Elite names in the {{tournamentName}} field',
+    body:
+      '{{championNames}} {{verb}} in the field for {{tournamentName}}. A proper measuring stick awaits.',
+    tag:     'press',
   },
 };
 

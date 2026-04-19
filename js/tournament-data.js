@@ -2,8 +2,8 @@
 //
 // Static catalogue of real and fictional chess tournaments. Phase C.1
 // ships Tier 1 (local amateur, home country) and Tier 2 (national /
-// international amateur opens). Higher tiers (international opens,
-// GM round-robins, elite, world cycle) land in Phase G.
+// international amateur opens). Phase G extends the catalogue through
+// Tier 6 with named international masters and elite events.
 //
 // Pure data + small lookup helpers. No mutations. No state. Other
 // modules read from here via the public API.
@@ -25,11 +25,16 @@
 //                   player's nationality at instance time, so every
 //                   player gets these in their calendar regardless of
 //                   which nation they picked at character creation.
-//   tier:           1 = local amateur, 2 = national amateur
+//   tier:           1 = local amateur
+//                   2 = national / amateur international
+//                   3 = strong international open
+//                   4 = challenger / IM-GM norm corridor
+//                   5 = supertournament circuit
+//                   6 = world-cycle endgame
 //   eloMin:         minimum player Elo to register
 //   eloMax:         soft cap — beyond this the tournament is "below your level"
 //   rounds:         number of rounds played
-//   pairingSystem:  'swiss' for now (only system supported)
+//   pairingSystem:  'swiss' | 'roundrobin'
 //   daysDuration:   total span of the tournament in calendar days
 //   entryFee:       cost in money units, charged on registration
 //   prizes:         array of payouts by final rank (index 0 = first place)
@@ -529,6 +534,364 @@ const TournamentData = (() => {
       annualDates: [{ month: 8, day: 12 }],
       description:
         'A mid-August open at a Massachusetts resort, traditional Continental Chess Association event.',
+    },
+
+    // ══════════════════════════════════════════════════════════
+    // TIER 3 — strong international opens
+    // ══════════════════════════════════════════════════════════
+
+    {
+      id:            'gibraltar_masters',
+      name:          'Gibraltar Masters',
+      city:          'Gibraltar',
+      country:       'GB',
+      tier:          3,
+      eloMin:        2100,
+      eloMax:        2450,
+      rounds:        10,
+      pairingSystem: 'swiss',
+      daysDuration:  8,
+      entryFee:      180,
+      prizes:        [9000, 4500, 2500, 1600, 1100, 800, 600, 450],
+      annualDates: [{ month: 1, day: 24 }],
+      description:
+        'A major winter open where titled visitors start blending into the scenery.',
+    },
+
+    {
+      id:            'reykjavik_open',
+      name:          'Reykjavik Open',
+      city:          'Reykjavik',
+      country:       'IS',
+      tier:          3,
+      eloMin:        2100,
+      eloMax:        2450,
+      rounds:        9,
+      pairingSystem: 'swiss',
+      daysDuration:  8,
+      entryFee:      170,
+      prizes:        [7500, 3800, 2200, 1400, 900, 700, 500],
+      annualDates: [{ month: 4, day: 9 }],
+      description:
+        'A cold-weather festival with a warm reputation and a surprisingly sharp field.',
+    },
+
+    {
+      id:            'hastings_masters',
+      name:          'Hastings Masters',
+      city:          'Hastings',
+      country:       'GB',
+      tier:          3,
+      eloMin:        2150,
+      eloMax:        2475,
+      rounds:        9,
+      pairingSystem: 'swiss',
+      daysDuration:  9,
+      entryFee:      160,
+      prizes:        [6800, 3400, 1900, 1200, 800, 600, 450],
+      annualDates: [{ month: 12, day: 28 }],
+      description:
+        'A stronger masters section orbiting the old Hastings tradition.',
+    },
+
+    {
+      id:            'isle_of_man_open',
+      name:          'Isle of Man Masters',
+      city:          'Douglas',
+      country:       'GB',
+      tier:          3,
+      eloMin:        2200,
+      eloMax:        2480,
+      rounds:        9,
+      pairingSystem: 'swiss',
+      daysDuration:  8,
+      entryFee:      210,
+      prizes:        [10000, 5000, 2800, 1700, 1200, 800, 600],
+      annualDates: [{ month: 10, day: 6 }],
+      description:
+        'A packed island open where masters and hungry norm chasers collide.',
+    },
+
+    {
+      id:            'charlotte_open',
+      name:          'Charlotte Open',
+      city:          'Charlotte',
+      country:       'US',
+      tier:          3,
+      eloMin:        2100,
+      eloMax:        2425,
+      rounds:        9,
+      pairingSystem: 'swiss',
+      daysDuration:  6,
+      entryFee:      160,
+      prizes:        [6000, 3000, 1800, 1100, 700, 500],
+      annualDates: [{ month: 6, day: 19 }],
+      description:
+        'A serious American open where every section feels one pairing tougher than advertised.',
+    },
+
+    // ══════════════════════════════════════════════════════════
+    // TIER 4 — challengers / norm corridor
+    // ══════════════════════════════════════════════════════════
+
+    {
+      id:            'tata_steel_challengers',
+      name:          'Tata Steel Challengers',
+      city:          'Wijk aan Zee',
+      country:       'NL',
+      tier:          4,
+      eloMin:        2350,
+      eloMax:        2550,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  10,
+      entryFee:      260,
+      prizes:        [14000, 7000, 3800, 2400, 1600, 1100],
+      annualDates: [{ month: 1, day: 17 }],
+      description:
+        'The last corridor before the true top circuit. Everyone in the room thinks they belong higher.',
+    },
+
+    {
+      id:            'prague_challengers_masters',
+      name:          'Prague Challengers',
+      city:          'Prague',
+      country:       'CZ',
+      tier:          4,
+      eloMin:        2360,
+      eloMax:        2560,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  9,
+      entryFee:      250,
+      prizes:        [13500, 6800, 3600, 2300, 1500, 1000],
+      annualDates: [{ month: 2, day: 26 }],
+      description:
+        'The pressure rises fast here: one good week can open every door above.',
+    },
+
+    {
+      id:            'norway_challengers',
+      name:          'Norway Challengers',
+      city:          'Stavanger',
+      country:       'NO',
+      tier:          4,
+      eloMin:        2380,
+      eloMax:        2580,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  8,
+      entryFee:      275,
+      prizes:        [15000, 7600, 4200, 2600, 1700, 1100],
+      annualDates: [{ month: 5, day: 25 }],
+      description:
+        'A narrow doorway into the Nordic elite circuit, with very little forgiveness.',
+    },
+
+    {
+      id:            'biel_challengers',
+      name:          'Biel Challengers',
+      city:          'Biel/Bienne',
+      country:       'CH',
+      tier:          4,
+      eloMin:        2350,
+      eloMax:        2550,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  9,
+      entryFee:      245,
+      prizes:        [13200, 6600, 3500, 2200, 1400, 1000],
+      annualDates: [{ month: 7, day: 15 }],
+      description:
+        'Technically a challengers event, practically a test of whether you can breathe at this altitude.',
+    },
+
+    {
+      id:            'superbet_challengers',
+      name:          'Superbet Challengers',
+      city:          'Bucharest',
+      country:       'RO',
+      tier:          4,
+      eloMin:        2400,
+      eloMax:        2600,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  8,
+      entryFee:      290,
+      prizes:        [15500, 7800, 4300, 2700, 1800, 1200],
+      annualDates: [{ month: 11, day: 4 }],
+      description:
+        'A polished broadcast stage and a field full of players who expect to become stars.',
+    },
+
+    // ══════════════════════════════════════════════════════════
+    // TIER 5 — supertournament circuit
+    // ══════════════════════════════════════════════════════════
+
+    {
+      id:            'tata_steel_masters',
+      name:          'Tata Steel Masters',
+      city:          'Wijk aan Zee',
+      country:       'NL',
+      tier:          5,
+      eloMin:        2500,
+      eloMax:        2750,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  11,
+      entryFee:      420,
+      prizes:        [30000, 15000, 9000, 6000, 4200, 2800],
+      annualDates: [{ month: 1, day: 17 }],
+      description:
+        'The famous winter stage where the field stops being hopeful and starts being dangerous.',
+    },
+
+    {
+      id:            'norway_chess',
+      name:          'Norway Chess',
+      city:          'Stavanger',
+      country:       'NO',
+      tier:          5,
+      eloMin:        2525,
+      eloMax:        2770,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  9,
+      entryFee:      450,
+      prizes:        [32000, 16000, 9600, 6200, 4300, 3000],
+      annualDates: [{ month: 5, day: 26 }],
+      description:
+        'Prestige, cameras, top boards, and no easy rounds anywhere.',
+    },
+
+    {
+      id:            'sinquefield_cup',
+      name:          'Sinquefield Cup',
+      city:          'Saint Louis',
+      country:       'US',
+      tier:          5,
+      eloMin:        2550,
+      eloMax:        2780,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  9,
+      entryFee:      480,
+      prizes:        [34000, 17000, 10000, 6500, 4500, 3200],
+      annualDates: [{ month: 8, day: 21 }],
+      description:
+        'One of the modern centerpieces of the elite circuit, unforgiving from round one.',
+    },
+
+    {
+      id:            'superbet_romania',
+      name:          'Superbet Romania',
+      city:          'Bucharest',
+      country:       'RO',
+      tier:          5,
+      eloMin:        2525,
+      eloMax:        2760,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  8,
+      entryFee:      430,
+      prizes:        [28000, 14500, 8600, 5600, 3900, 2600],
+      annualDates: [{ month: 5, day: 5 }],
+      description:
+        'A sharp, modern super-event where preparation and nerve both matter.',
+    },
+
+    {
+      id:            'grand_chess_tour_finals',
+      name:          'Grand Chess Tour Finals',
+      city:          'London',
+      country:       'GB',
+      tier:          5,
+      eloMin:        2550,
+      eloMax:        2780,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  8,
+      entryFee:      500,
+      prizes:        [36000, 18000, 11000, 7000, 5000, 3500],
+      annualDates: [{ month: 12, day: 3 }],
+      description:
+        'Career-mode Swiss wrapper around a true top-level showcase. Every board looks expensive.',
+    },
+
+    // ══════════════════════════════════════════════════════════
+    // TIER 6 — world-cycle endgame
+    // ══════════════════════════════════════════════════════════
+
+    {
+      id:            'grand_swiss',
+      name:          'FIDE Grand Swiss',
+      city:          'Douglas',
+      country:       'GB',
+      tier:          6,
+      eloMin:        2650,
+      eloMax:        2850,
+      rounds:        11,
+      pairingSystem: 'roundrobin',
+      daysDuration:  10,
+      entryFee:      650,
+      prizes:        [50000, 26000, 15000, 10000, 7000, 5000],
+      annualDates: [{ month: 10, day: 24 }],
+      description:
+        'The strongest large Swiss in the game, and a direct route into the world-cycle conversation.',
+    },
+
+    {
+      id:            'world_cup',
+      name:          'World Cup',
+      city:          'Baku',
+      country:       'AZ',
+      tier:          6,
+      eloMin:        2670,
+      eloMax:        2850,
+      rounds:        9,
+      pairingSystem: 'roundrobin',
+      daysDuration:  11,
+      entryFee:      700,
+      prizes:        [52000, 27000, 16000, 10500, 7200, 5200],
+      annualDates: [{ month: 7, day: 4 }],
+      description:
+        'Adapted here as a brutal elite Swiss: survive the room long enough and the whole circuit notices.',
+    },
+
+    {
+      id:            'candidates',
+      name:          'Candidates',
+      city:          'Madrid',
+      country:       'ES',
+      tier:          6,
+      eloMin:        2700,
+      eloMax:        2850,
+      rounds:        7,
+      pairingSystem: 'roundrobin',
+      daysDuration:  10,
+      entryFee:      760,
+      prizes:        [60000, 30000, 18000, 12000, 8000, 5500],
+      annualDates: [{ month: 6, day: 14 }],
+      description:
+        'Not the literal Candidates format, but the same level of tension: elite only, no soft landings.',
+    },
+
+    {
+      id:            'world_championship',
+      name:          'World Championship',
+      city:          'Singapore',
+      country:       'SG',
+      tier:          6,
+      eloMin:        2725,
+      eloMax:        2850,
+      rounds:        7,
+      pairingSystem: 'roundrobin',
+      daysDuration:  11,
+      entryFee:      850,
+      prizes:        [70000, 36000, 22000, 14000, 9000, 6000],
+      annualDates: [{ month: 11, day: 19 }],
+      description:
+        'A career-mode abstraction of the final stage: if you are here, you have already made it.',
     },
 
   ];

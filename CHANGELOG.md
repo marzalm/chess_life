@@ -9,6 +9,130 @@ Project timeline is organized by **Phases** (A → H) as defined in [CLAUDE.md](
 
 ## [Unreleased]
 
+### Phase G follow-up: worker race fix, dev panel, adaptive Focus threshold (2026-04-17)
+
+Second G.2 stabilization pass plus early G tuning work.
+
+#### Shared Stockfish Worker race fix
+- fixed the G.2 race where a cancelled eval could leak an orphan
+  `bestmove` into the opponent resolver on the shared Stockfish Worker
+- new `_cancelAndDrain()` in `js/chess-engine.js`:
+  - posts `stop`
+  - resolves the cancelled eval safely
+  - drains the worker with `isready` / `readyok`
+  - fails open after 500ms to avoid an infinite hang
+- all four cancel paths now use the same drain barrier:
+  - `_evaluate`
+  - `_evaluateMultiPV`
+  - `_evaluateWithMove`
+  - `requestOpponentMove`
+- added optimization guards so `_runFocusEval()` and
+  `_launchBestMovePrefetch()` do not churn the worker during puzzle
+  playback, and prefetch also skips while `_opponentBusy` is true
+- renamed the stale UI log from `Illegal move from Maia` to
+  `Illegal move from opponent engine`
+- new regression suite:
+  [tests/chess-engine-worker-race.test.js](tests/chess-engine-worker-race.test.js)
+
+#### Dev quick-test panel
+- new `js/dev-tools.js` exposed as `window.cl.dev`
+- home screen now includes a `🛠 Dev panel` button for forcing:
+  - player Elo
+  - opponent Elo
+  - difficulty
+  - tier
+  - color
+- preset coverage includes:
+  - Maia low
+  - Maia ceiling
+  - Stockfish elite
+- live preview shows the computed effective Elo and the routed engine
+  (`Maia` or `Stockfish`)
+- intended only for manual G.1/G.2 testing; no URL gating yet
+
+#### Focus adaptive threshold refinement
+- `focus-system.js` no longer uses the displayed opponent Elo when
+  adapting the "good move" threshold; it now prefers the live
+  **effective** opponent Elo via `UIManager.getEffectiveOpponentElo()`
+- this removes the previous mismatch where easy/normal difficulty could
+  make the engine play weaker while Focus still judged the player as if
+  the stronger displayed Elo were on the board
+- the adaptive threshold is now explicitly covered by tests:
+  - effective-vs-displayed Elo selection
+  - relaxed base thresholds by player Elo band
+  - stronger gap penalty when the opponent is stronger
+  - stronger gap effect at high Elo for the same gap
+  - absolute 15cp floor after Flow tightening
+- `tests/focus-system.test.js` now has 8 passing tests
+
+#### Baseline
+- current full suite: **396 passed, 0 failed** across 14 suites
+
+### Phase G.1 / G.2 — accessibility baseline and Stockfish opponent (2026-04-15)
+
+Phase G has started with the two foundation slices now in place:
+global opponent accessibility math and the first elite-opponent path
+above Maia's ceiling.
+
+#### G.1 — accessibility baseline
+- new `js/difficulty-system.js`:
+  - `effectiveOpponentElo(playerElo, displayedElo, difficulty, tier?)`
+  - `convertToFideEquivalent(source, rating)`
+  - `suggestDifficultyFromOnlineRating(source, rating)`
+- added `player.settings.difficulty` to the save schema with defensive
+  migration for older saves
+- character creator now includes:
+  - difficulty dropdown (`easy / normal / realistic`)
+  - optional collapsible helper that suggests a preset from online
+    rating input
+- live opponent selection now uses the **effective** Elo rather than
+  the displayed Elo directly
+- easy mode includes the locked tier-aware gap cap:
+  - Tier 1-3 → `player + 350`
+  - Tier 4-6 → `player + 500`
+
+#### G.2 — humanized Stockfish opponent
+- new `js/stockfish-opponent.js` built on the **existing single**
+  Stockfish Worker only
+- new `ChessEngine.requestOpponentMove(fen, opts)` serializes opponent
+  requests on the shared worker and blocks eval traffic until the move
+  request completes
+- humanization shipped in baseline form:
+  - `MultiPV = 10`
+  - movetime interpolation: `250ms @ 2000`, `300ms @ 2400`,
+    `450ms @ 2800`
+  - temperature interpolation: `60cp @ 2000`, `30cp @ 2400`,
+    `15cp @ 2800`
+  - softmax sampling by `exp(-delta_cp / T)`
+- live routing in `UIManager` is now:
+  - effective Elo `<= 2000` → Maia
+  - effective Elo `> 2000` → `StockfishOpponent`
+- `stockfish-opponent.js` is now loaded in the browser runtime
+
+#### Tests
+- new `tests/difficulty-system.test.js`
+- new `tests/stockfish-opponent.test.js`
+- new `tests/ui-manager-ai-routing.test.js`
+- full baseline is now **388 passed, 0 failed**
+
+### Phase G.1 / G.2 completion pass (2026-04-15)
+
+Closed the remaining implementation gap after the first G.1 / G.2
+drop: the accessibility math and Stockfish-opponent wrapper already
+existed, but runtime play was still routed only through Maia.
+
+- **`UIManager` now routes live opponent moves by effective Elo.**
+  After difficulty dampening, opponents at `targetElo <= 2000` still
+  use Maia (opening book first, then policy move). Opponents above
+  `2000` now go through `StockfishOpponent.getMove(...)`.
+- **`stockfish-opponent.js` is now loaded in the browser.** The module
+  existed on disk but was missing from `index.html`, so the live branch
+  could not have worked even if called.
+- **New routing regression suite.** `tests/ui-manager-ai-routing.test.js`
+  pins the seam directly: `>2000 → Stockfish`, `<=2000 → Maia`, Maia
+  opening-book hits still short-circuit correctly, and a dampened
+  high-display opponent that lands below `2000` still routes to Maia.
+
 ### Phase F playtest fixes (2026-04-15)
 
 First playtest pass after Phase F shipped. Fixes UX confusion and three

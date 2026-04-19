@@ -24,9 +24,11 @@ function buildGameEventsMock() {
   return {
     EVENTS: {
       TOURNAMENT_FINISHED: 'tournament_finished',
+      TOURNAMENT_STARTED: 'tournament_started',
       MAIL_RECEIVED: 'mail_received',
       COACH_HIRED: 'coach_hired',
       COACH_FIRED: 'coach_fired',
+      TITLE_EARNED: 'title_earned',
     },
     on(eventName, handler) {
       const bucket = listeners.get(eventName) || new Set();
@@ -68,6 +70,7 @@ function reset() {
     playerName: 'Tester',
     nationality: 'NO',
     elo: 1500,
+    title: null,
   };
   _calendarDate = { year: 2026, month: 4, day: 10 };
   _inboxState = { mails: [] };
@@ -452,15 +455,44 @@ function assertEq(actual, expected, msg) {
     assert(_inboxState.mails[0].body.includes('$520'));
   });
 
+  await test('TOURNAMENT_STARTED pushes champion_in_field when elite names are present', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_STARTED, {
+      tournamentId: 'grand_swiss',
+      tournamentName: 'FIDE Grand Swiss',
+      champions: [
+        { id: 'champ_holm_viktor', name: 'Viktor Holm', title: 'GM', elo: 2814 },
+        { id: 'champ_jun_wei', name: 'Wei Jun', title: 'GM', elo: 2838 },
+      ],
+    });
+    await flushMicrotasks();
+    assertEq(_inboxState.mails.length, 1);
+    assertEq(_inboxState.mails[0].templateId, 'champion_in_field');
+    assert(_inboxState.mails[0].body.includes('GM Viktor Holm'));
+    assert(_inboxState.mails[0].body.includes('GM Wei Jun'));
+  });
+
+  await test('TITLE_EARNED pushes the permanent recognition mail', async () => {
+    InboxSystem.init();
+    GameEvents.emit(GameEvents.EVENTS.TITLE_EARNED, { title: 'IM' });
+    await flushMicrotasks();
+    assertEq(_inboxState.mails.length, 1);
+    assertEq(_inboxState.mails[0].templateId, 'title_earned');
+    assertEq(_inboxState.mails[0].from, 'FIDE Office');
+    assert(_inboxState.mails[0].subject.includes('IM'));
+    assert(_inboxState.mails[0].body.includes('International Master'));
+  });
+
   console.log('\n── F.3: round press + rival watch ──');
 
   await test('TOURNAMENT_ROUND_FINISHED pushes a round_press_player_result mail', async () => {
     InboxSystem.init();
+    _player.title = 'CM';
     GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_ROUND_FINISHED, {
       tournamentId: 'local_weekend_open',
       tournamentName: 'Local Weekend Open',
       round: 2,
-      opponent: { id: 'opp_abc', name: 'Opponent X', elo: 1550 },
+      opponent: { id: 'opp_abc', name: 'Opponent X', title: 'FM', elo: 1550 },
       playerResult: 'win',
       notableResults: [],
       finished: false,
@@ -468,8 +500,8 @@ function assertEq(actual, expected, msg) {
     await flushMicrotasks();
     const mails = _inboxState.mails.filter((m) => m.templateId === 'round_press_player_result');
     assertEq(mails.length, 1);
-    assert(mails[0].body.includes('Opponent X'), 'body mentions opponent');
-    assert(mails[0].body.includes('Tester'), 'body mentions player name');
+    assert(mails[0].body.includes('FM Opponent X'), 'body mentions opponent title');
+    assert(mails[0].body.includes('CM Tester'), 'body mentions player title');
   });
 
   await test('TOURNAMENT_ROUND_FINISHED pushes rival_round_watch only for met rivals', async () => {
@@ -484,8 +516,8 @@ function assertEq(actual, expected, msg) {
       opponent: { id: 'opp_y', name: 'Other', elo: 1200 },
       playerResult: 'draw',
       notableResults: [
-        { rivalId: 'rival_novak_pavel', name: 'Pavel Novák', opponentId: 'opp_q', opponentName: 'Q', result: 'win' },
-        { rivalId: 'rival_tanaka_yuki', name: 'Yuki Tanaka', opponentId: 'opp_r', opponentName: 'R', result: 'loss' },
+        { rivalId: 'rival_novak_pavel', name: 'Pavel Novák', title: 'IM', opponentId: 'opp_q', opponentName: 'Q', opponentTitle: null, result: 'win' },
+        { rivalId: 'rival_tanaka_yuki', name: 'Yuki Tanaka', title: 'FM', opponentId: 'opp_r', opponentName: 'R', opponentTitle: null, result: 'loss' },
       ],
       finished: false,
     });
@@ -493,7 +525,7 @@ function assertEq(actual, expected, msg) {
 
     const watchMails = _inboxState.mails.filter((m) => m.templateId === 'rival_round_watch');
     assertEq(watchMails.length, 1, 'only the met rival gets a mail');
-    assert(watchMails[0].body.includes('Pavel Novák'), 'mentions Pavel');
+    assert(watchMails[0].body.includes('IM Pavel Novák'), 'mentions Pavel title');
   });
 
   await test('round_press_player_result tone varies with playerResult', async () => {

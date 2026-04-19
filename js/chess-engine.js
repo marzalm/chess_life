@@ -10,6 +10,71 @@ const ChessEngine = (() => {
   let _ready       = false;
   let _evalResolve = null;
 
+  // Phase G.2 — opponent-mode slot on the same single Worker.
+  // When `_opponentResolve` is set, the worker is busy producing an
+  // opponent move (MultiPV + movetime). Eval requests must wait for
+  // it to complete (they cannot cancel an opponent move). Opponent
+  // requests queue behind each other via `_busyWaiters`.
+  let _opponentResolve = null;
+  let _opponentLines   = [];
+  let _opponentBusy    = false;
+  const _busyWaiters   = [];
+
+  // FIFO of one-shot `readyok` waiters. Populated by `_cancelAndDrain()`
+  // after a `stop` so the next caller does NOT arm a new resolver while
+  // the worker still has a stale `bestmove` in flight. The init path's
+  // `readyok` (before any drain ever ran) is handled by the fallback in
+  // `_onWorkerMessage` when the FIFO is empty.
+  const _readyWaiters  = [];
+
+  function _waitUntilOpponentIdle() {
+    if (!_opponentBusy) return Promise.resolve();
+    return new Promise((r) => _busyWaiters.push(r));
+  }
+
+  function _releaseOpponentBusy() {
+    _opponentBusy = false;
+    const waiters = _busyWaiters.splice(0);
+    for (const w of waiters) w();
+  }
+
+  /**
+   * Cancel any in-flight eval and drain the worker via a `stop` +
+   * `isready`/`readyok` barrier. After this resolves, the worker has
+   * processed the cancelled eval's orphan `bestmove` and is idle, so
+   * the caller can safely arm `_opponentResolve` or a new `_evalResolve`
+   * without the router confusing an orphan for the new result.
+   *
+   * 500 ms safety timeout: if `readyok` somehow never arrives we fail
+   * open to avoid an indefinite hang. The timeout path removes the exact
+   * waiter from the FIFO so a later unrelated `readyok` cannot pop a
+   * stale resolver.
+   */
+  async function _cancelAndDrain() {
+    if (!_worker) return;
+    if (!_evalResolve) return;
+
+    _worker.postMessage('stop');
+    const prev = _evalResolve;
+    _evalResolve = null;
+    if (prev._multiPV) prev([]);
+    else               prev(0);
+
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        const idx = _readyWaiters.indexOf(done);
+        if (idx >= 0) _readyWaiters.splice(idx, 1);
+        resolve();
+      };
+      _readyWaiters.push(done);
+      _worker.postMessage('isready');
+      setTimeout(done, 500);
+    });
+  }
+
   // Évaluation anticipée (prefetch au premier clic)
   let _prefetchPromise = null;
   let _prefetchFen     = null;
@@ -23,6 +88,7 @@ const ChessEngine = (() => {
   let _cachedBestMove    = null;   // { from, to, cp } ou null
   let _cachedBestMoveFen = null;   // FEN correspondant au cache
   let _bestMovePromise   = null;   // Promise en cours ou null
+  let _lastEvalCp        = null;   // last cpAfter from Focus background eval, from opponent POV
 
   const FOCUS_DEPTH  = 10;
   const MANUAL_DEPTH = 14;
@@ -40,7 +106,50 @@ const ChessEngine = (() => {
     if (typeof msg !== 'string') return;
 
     if (msg === 'uciok')  { _worker.postMessage('isready'); return; }
-    if (msg === 'readyok') { _ready = true; return; }
+    if (msg === 'readyok') {
+      // Drain barrier first: if a `_cancelAndDrain()` call is waiting,
+      // this `readyok` is its ack. Otherwise it's either the init ack
+      // or a `reset()` ack — both of which want `_ready = true`.
+      if (_readyWaiters.length > 0) {
+        const w = _readyWaiters.shift();
+        w();
+        return;
+      }
+      _ready = true;
+      return;
+    }
+
+    // ── Opponent mode (G.2) — collect multipv lines, resolve on bestmove
+    if (_opponentResolve) {
+      if (msg.includes('score') && msg.includes(' pv ')) {
+        const pvMatch   = msg.match(/multipv (\d+)/);
+        const cpMatch   = msg.match(/score cp (-?\d+)/);
+        const mateMatch = msg.match(/score mate (-?\d+)/);
+        const moveMatch = msg.match(/ pv (\S+)/);
+        if (moveMatch) {
+          const pvNum = pvMatch ? parseInt(pvMatch[1]) : 1;
+          const cp    = cpMatch  ? parseInt(cpMatch[1])
+                      : mateMatch ? (parseInt(mateMatch[1]) > 0 ? 10000 : -10000)
+                      : 0;
+          const entry = { pvNum, move: moveMatch[1], cp };
+          const existing = _opponentLines.findIndex((p) => p.pvNum === pvNum);
+          if (existing >= 0) _opponentLines[existing] = entry;
+          else               _opponentLines.push(entry);
+        }
+      }
+      if (msg.startsWith('bestmove')) {
+        const bm = msg.match(/bestmove\s+(\S+)/);
+        const bestMove = bm ? bm[1] : null;
+        const lines = _opponentLines.slice().sort((a, b) => a.pvNum - b.pvNum);
+        const resolve = _opponentResolve;
+        _opponentResolve = null;
+        _opponentLines   = [];
+        _worker.postMessage('setoption name MultiPV value 1');
+        resolve({ lines, bestMove });
+      }
+      return;
+    }
+
     if (!_evalResolve) return;
 
     // ── Mode multiPV ──
@@ -102,18 +211,11 @@ const ChessEngine = (() => {
    * @param {number} numPV — nombre de variantes
    * @returns {Promise<Array<{move: string, cp: number}>>}
    */
-  function _evaluateMultiPV(fen, depth, numPV) {
+  async function _evaluateMultiPV(fen, depth, numPV) {
+    await _waitUntilOpponentIdle();
+    if (!_worker || !_ready) return [];
+    await _cancelAndDrain();
     return new Promise((resolve) => {
-      if (!_worker || !_ready) { resolve([]); return; }
-
-      if (_evalResolve) {
-        _worker.postMessage('stop');
-        const prev = _evalResolve;
-        _evalResolve = null;
-        if (prev._multiPV) prev([]);
-        else                prev(0);
-      }
-
       resolve._multiPV = true;
       resolve._pvLines = [];
       _evalResolve = resolve;
@@ -124,18 +226,11 @@ const ChessEngine = (() => {
     });
   }
 
-  function _evaluate(fen, depth) {
+  async function _evaluate(fen, depth) {
+    await _waitUntilOpponentIdle();
+    if (!_worker || !_ready) return 0;
+    await _cancelAndDrain();
     return new Promise((resolve) => {
-      if (!_worker || !_ready) { resolve(0); return; }
-
-      // Annuler une éventuelle évaluation en cours
-      if (_evalResolve) {
-        _worker.postMessage('stop');
-        const prev = _evalResolve;
-        _evalResolve = null;
-        prev(0);
-      }
-
       resolve._lastCp   = undefined;
       resolve._bestMove = null;
       _evalResolve = resolve;
@@ -148,17 +243,11 @@ const ChessEngine = (() => {
    * Évalue une position et retourne { cp, bestMove }.
    * bestMove est en notation UCI (ex: "e2e4").
    */
-  function _evaluateWithMove(fen, depth) {
+  async function _evaluateWithMove(fen, depth) {
+    await _waitUntilOpponentIdle();
+    if (!_worker || !_ready) return { cp: 0, bestMove: null };
+    await _cancelAndDrain();
     return new Promise((resolve) => {
-      if (!_worker || !_ready) { resolve({ cp: 0, bestMove: null }); return; }
-
-      if (_evalResolve) {
-        _worker.postMessage('stop');
-        const prev = _evalResolve;
-        _evalResolve = null;
-        prev(0);
-      }
-
       const wrapper = (cp) => {
         resolve({ cp, bestMove: wrapper._bestMove || null });
       };
@@ -181,6 +270,20 @@ const ChessEngine = (() => {
    * @param {string} fenAfter  — FEN APRÈS le coup du joueur (pour cpAfter)
    */
   async function _runFocusEval(fenBefore, fenAfter, sfUsedFlag, capturedPiece, plyIndex) {
+    // Perf guard: during a puzzle playback, Focus is already paused
+    // (`BonusSystem._runPlayback` calls `FocusSystem.pauseForPlayback()`),
+    // so running the eval here would just churn the shared worker and
+    // force useless drain round-trips before each opponent move. The
+    // correctness fix lives in `_cancelAndDrain()`; this is optimization.
+    // Edge case: if a future feature lets the player invoke `makeMove`
+    // on the player color mid-opponent-turn (takeback, mutating hint),
+    // revisit this guard.
+    if (typeof BonusSystem !== 'undefined'
+        && typeof BonusSystem.isPlaybackActive === 'function'
+        && BonusSystem.isPlaybackActive()) {
+      return;
+    }
+
     _bgEvalRunning = true;
 
     // cpBefore : utiliser le prefetch s'il correspond, sinon évaluer maintenant
@@ -196,6 +299,7 @@ const ChessEngine = (() => {
 
     // Calculer cpAfter (du point de vue de l'adversaire)
     const cpAfter = await _evaluate(fenAfter, FOCUS_DEPTH);
+    _lastEvalCp = cpAfter;
 
     const deltaCp = cpBefore + cpAfter;
     console.log(`[Engine] cpBefore=${cpBefore}  cpAfter=${cpAfter}(adv)  delta=${deltaCp}`);
@@ -234,6 +338,18 @@ const ChessEngine = (() => {
   function _launchBestMovePrefetch() {
     // Ne pas interrompre une évaluation Focus en cours
     if (_bgEvalRunning) return;
+
+    // Do not start a MANUAL_DEPTH search while the opponent is already
+    // using the worker. The prefetch runs deeper than Focus eval and
+    // its race window with a concurrent opponent request is larger.
+    if (_opponentBusy) return;
+
+    // Perf guard mirrors `_runFocusEval`: skip during puzzle playback.
+    if (typeof BonusSystem !== 'undefined'
+        && typeof BonusSystem.isPlaybackActive === 'function'
+        && BonusSystem.isPlaybackActive()) {
+      return;
+    }
 
     const fen = _game.fen();
     // Déjà en cache ou en cours pour cette position
@@ -276,6 +392,7 @@ const ChessEngine = (() => {
       _cachedBestMove         = null;
       _cachedBestMoveFen      = null;
       _bestMovePromise        = null;
+      _lastEvalCp             = null;
       if (_worker) {
         _worker.postMessage('stop');
         _worker.postMessage('ucinewgame');
@@ -377,8 +494,21 @@ const ChessEngine = (() => {
         return await _bestMovePromise;
       }
 
-      // Aucun cache — lancer le calcul (fallback)
+      // During playback, `_launchBestMovePrefetch` is guarded off (the
+      // optimization skip we added for the Worker race). But `getBestMove`
+      // is an explicit request from the playback loop, not a background
+      // fire-and-forget — it MUST reach the Worker. Go directly to
+      // `_evaluateWithMove` to bypass the prefetch guard.
       _launchBestMovePrefetch();
+      if (!_bestMovePromise) {
+        const result = await _evaluateWithMove(fen, MANUAL_DEPTH);
+        if (!result.bestMove || result.bestMove.length < 4) return null;
+        return {
+          from: result.bestMove.substring(0, 2),
+          to:   result.bestMove.substring(2, 4),
+          cp:   result.cp,
+        };
+      }
       return await _bestMovePromise;
     },
 
@@ -547,6 +677,58 @@ const ChessEngine = (() => {
         };
         check();
       });
+    },
+
+    getLastEvalCp() {
+      return Number.isFinite(_lastEvalCp) ? _lastEvalCp : null;
+    },
+
+    /**
+     * Phase G.2 — request an opponent move on the shared Stockfish
+     * Worker. Returns the top-N PV lines with centipawn evals.
+     * Evaluations are blocked until this returns; concurrent opponent
+     * requests are serialized FIFO.
+     *
+     * @param {string} fen
+     * @param {{ movetimeMs?: number, multipv?: number }} [opts]
+     * @returns {Promise<{ lines: Array<{ pvNum, move, cp }>, bestMove: string|null }>}
+     */
+    async requestOpponentMove(fen, opts = {}) {
+      const movetimeMs = Number.isFinite(opts.movetimeMs) ? opts.movetimeMs : 300;
+      const multipv    = Number.isFinite(opts.multipv)    ? opts.multipv    : 10;
+
+      // Wait for any in-flight opponent request to finish.
+      while (_opponentBusy) {
+        await _waitUntilOpponentIdle();
+      }
+      if (!_worker || !_ready) {
+        return { lines: [], bestMove: null };
+      }
+
+      // Cancel any in-flight eval and drain the worker via
+      // `stop`+`isready`/`readyok` before arming `_opponentResolve`.
+      // This prevents the cancelled eval's orphan `bestmove` from
+      // being misrouted into the opponent branch (Phase G.2 race).
+      await _cancelAndDrain();
+
+      _opponentBusy  = true;
+      _opponentLines = [];
+      try {
+        const result = await new Promise((resolve) => {
+          _opponentResolve = resolve;
+          _worker.postMessage('setoption name MultiPV value ' + multipv);
+          _worker.postMessage('position fen ' + fen);
+          _worker.postMessage('go movetime ' + movetimeMs);
+        });
+        return result;
+      } finally {
+        _releaseOpponentBusy();
+      }
+    },
+
+    /** @returns {boolean} true if an opponent request is in-flight. */
+    isOpponentBusy() {
+      return _opponentBusy;
     },
 
     /**

@@ -33,12 +33,19 @@
  */
 
 /**
+ * @typedef {object} PlayerSettings
+ * @property {'realistic'} difficulty
+ */
+
+/**
  * @typedef {object} PlayerState
  * @property {string} playerName
  * @property {string} nationality  Country name or ISO-like code
  * @property {string} gender       'M' | 'F' | 'X' | ''
  * @property {PlayerAvatar} avatar
  * @property {number} elo
+ * @property {'CM' | 'FM' | 'IM' | 'GM' | null} title
+ * @property {PlayerSettings} settings
  */
 
 /**
@@ -150,6 +157,20 @@
 
 const CareerManager = (() => {
 
+  const TITLE_ORDER = [null, 'CM', 'FM', 'IM', 'GM'];
+  const TITLE_FULL_NAMES = {
+    CM: 'Candidate Master',
+    FM: 'FIDE Master',
+    IM: 'International Master',
+    GM: 'Grandmaster',
+  };
+  const TITLE_THRESHOLDS = [
+    { minElo: 2500, title: 'GM' },
+    { minElo: 2400, title: 'IM' },
+    { minElo: 2300, title: 'FM' },
+    { minElo: 2200, title: 'CM' },
+  ];
+
   /** @type {CareerState | null} */
   let _state = null;
 
@@ -169,6 +190,10 @@ const CareerManager = (() => {
         outfit:    0,
       },
       elo: 800,
+      title: null,
+      settings: {
+        difficulty: 'realistic',
+      },
     },
     calendar: {
       date:              { year: 2026, month: 4, day: 10 },
@@ -219,6 +244,65 @@ const CareerManager = (() => {
     return JSON.parse(JSON.stringify(obj));
   }
 
+  function _titleForElo(elo) {
+    const numericElo = Number.isFinite(elo) ? elo : 0;
+    const match = TITLE_THRESHOLDS.find((entry) => numericElo >= entry.minElo);
+    return match ? match.title : null;
+  }
+
+  function _isValidTitle(title) {
+    return TITLE_ORDER.includes(title);
+  }
+
+  function _titleRank(title) {
+    return TITLE_ORDER.indexOf(_isValidTitle(title) ? title : null);
+  }
+
+  function _normalizePlayerTitle(title, elo) {
+    const safeTitle = _isValidTitle(title) ? title : null;
+    const eloTitle = _titleForElo(elo);
+    return _titleRank(eloTitle) > _titleRank(safeTitle) ? eloTitle : safeTitle;
+  }
+
+  function _formatName(name, title) {
+    const safeName = (name || '').trim();
+    if (!safeName) return '';
+    return safeName;
+  }
+
+  function _formatTitledName(name, title) {
+    const safeName = _formatName(name, title);
+    if (!safeName) return title || '';
+    return title ? `${title} ${safeName}` : safeName;
+  }
+
+  function _formatTitleBadgeHTML(title) {
+    if (!_isValidTitle(title) || !title) return '';
+    return `<span class="title-badge title-${String(title).toLowerCase()}">${title}</span>`;
+  }
+
+  function _promotePlayerTitleIfNeeded(emitEvent = false) {
+    const player = _state && _state.player ? _state.player : null;
+    if (!player) return null;
+
+    const current = _isValidTitle(player.title) ? player.title : null;
+    const next = _normalizePlayerTitle(current, player.elo);
+    player.title = next;
+
+    if (next === current) return null;
+
+    if (
+      emitEvent &&
+      next &&
+      typeof GameEvents !== 'undefined' &&
+      GameEvents.EVENTS &&
+      GameEvents.EVENTS.TITLE_EARNED
+    ) {
+      GameEvents.emit(GameEvents.EVENTS.TITLE_EARNED, { title: next });
+    }
+    return next;
+  }
+
   function _save() {
     if (_state) SaveManager.save(_state);
   }
@@ -262,6 +346,14 @@ const CareerManager = (() => {
     // Phase C.2b — currentTournament slot may be missing on older saves
     if (s.calendar && s.calendar.currentTournament === undefined) {
       s.calendar.currentTournament = null;
+    }
+    // Phase G.1 — player.settings may be missing on older saves
+    if (s.player && (!s.player.settings || typeof s.player.settings !== 'object')) {
+      s.player.settings = _clone(DEFAULT_STATE.player.settings);
+    }
+    if (s.player) {
+      s.player.settings.difficulty = 'realistic';
+      s.player.title = _normalizePlayerTitle(s.player.title, s.player.elo);
     }
     return s;
   }
@@ -324,8 +416,21 @@ const CareerManager = (() => {
           gender:      data.gender || '',
           avatar:      { ...DEFAULT_STATE.player.avatar, ...(data.avatar || {}) },
           elo:         DEFAULT_STATE.player.elo,
+          title:       null,
+          settings:    { difficulty: 'realistic' },
         };
         _save();
+      },
+
+      titleForElo(elo) {
+        return _titleForElo(elo);
+      },
+
+      checkTitlePromotion() {
+        _ensure();
+        const earnedTitle = _promotePlayerTitleIfNeeded(true);
+        _save();
+        return earnedTitle;
       },
 
       /**
@@ -343,6 +448,7 @@ const CareerManager = (() => {
         const K     = elo < 2400 ? 32 : 16;
         const delta = Math.round(K * (score - E));
         _state.player.elo = Math.max(100, elo + delta);
+        _promotePlayerTitleIfNeeded(true);
         console.log(`[Elo] E=${E.toFixed(4)}  score=${score}  K=${K}  delta=${delta}  newElo=${_state.player.elo}`);
         _save();
         return delta;
@@ -487,6 +593,26 @@ const CareerManager = (() => {
         _ensure();
         return _state.training;
       },
+    },
+
+    titleForElo(elo) {
+      return _titleForElo(elo);
+    },
+
+    titleFullName(title) {
+      return TITLE_FULL_NAMES[title] || '';
+    },
+
+    formatName(name, title) {
+      return _formatName(name, title);
+    },
+
+    formatTitledName(name, title) {
+      return _formatTitledName(name, title);
+    },
+
+    formatTitleBadgeHTML(title) {
+      return _formatTitleBadgeHTML(title);
     },
 
   };

@@ -311,6 +311,157 @@
   color: var(--px-text);
 }
 
+/* ── DEV PANEL MODAL (G.1/G.2 quick-test tool) ───────────── */
+
+.dev-panel-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px;
+  color: var(--px-accent);
+  margin: 0 0 14px 0;
+  text-align: center;
+}
+
+.dev-panel-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.dev-panel-presets-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: var(--px-text-dim);
+  margin-right: 4px;
+}
+
+.dev-panel-preset-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  background: var(--px-panel-dark);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 6px 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.dev-panel-preset-btn:hover {
+  background: var(--px-panel);
+  color: var(--px-accent);
+}
+
+.dev-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.dev-panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dev-panel-field > span {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  color: var(--px-text-dim);
+  text-transform: uppercase;
+}
+
+.dev-panel-field input,
+.dev-panel-field select {
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  background: var(--px-panel-dark);
+  color: var(--px-text);
+  border: 2px solid var(--px-border);
+  padding: 4px 8px;
+}
+
+.dev-panel-grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dev-panel-grants-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  color: var(--px-text-dim);
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+
+.dev-panel-check {
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  color: var(--px-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.dev-panel-check input[type="checkbox"] {
+  accent-color: var(--px-accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.dev-panel-preview {
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  color: var(--px-accent);
+  background: var(--px-panel-dark);
+  border: 2px solid var(--px-border);
+  padding: 8px 10px;
+  text-align: center;
+  margin-bottom: 14px;
+  min-height: 24px;
+}
+
+.dev-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dev-panel-btn-secondary,
+.dev-panel-btn-primary {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border: 2px solid var(--px-border);
+  text-transform: uppercase;
+}
+
+.dev-panel-btn-secondary {
+  background: var(--px-panel-dark);
+  color: var(--px-text-dim);
+}
+
+.dev-panel-btn-secondary:hover {
+  background: var(--px-panel);
+  color: var(--px-text);
+}
+
+.dev-panel-btn-primary {
+  background: var(--px-accent);
+  color: var(--px-panel-dark);
+}
+
+.dev-panel-btn-primary:hover {
+  filter: brightness(1.1);
+}
+
 /* ── EVENT PROMPT MODAL ───────────────────────────────────── */
 
 #modal-event-prompt .modal-box {
@@ -1740,6 +1891,13 @@
 .t-pairing-name {
   font-size: 9px;
   color: var(--px-accent);
+}
+
+.t-pairing-tagline {
+  font-family: 'VT323', monospace;
+  font-size: 20px;
+  line-height: 1.05;
+  color: var(--px-text);
 }
 
 .t-pairing-elo {

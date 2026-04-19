@@ -16,6 +16,12 @@ const dataCode = fs.readFileSync(
 );
 const TournamentData = (new Function(`${dataCode}\nreturn TournamentData;`))();
 
+const championCode = fs.readFileSync(
+  path.join(__dirname, '..', 'js', 'champion-data.js'),
+  'utf8',
+);
+const ChampionData = (new Function(`${championCode}\nreturn ChampionData;`))();
+
 // ── Mocked dependencies ───────────────────────────────────────
 
 let _player;
@@ -34,6 +40,7 @@ function resetMocks() {
     gender:      'M',
     avatar:      {},
     elo:         1500,
+    title:       null,
   };
   _finances = { money: 500 };
   _calendarState = {
@@ -132,6 +139,7 @@ const CalendarSystem = {
 const GameEvents = {
   EVENTS: {
     TOURNAMENT_FINISHED: 'tournament_finished',
+    TOURNAMENT_STARTED: 'tournament_started',
     ROUND_PLAYED: 'round_played',
   },
   emit: (eventName, payload) => {
@@ -157,9 +165,9 @@ const sysCode = fs.readFileSync(
   'utf8',
 );
 const TournamentSystem = (new Function(
-  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem',
+  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem', 'ChampionData',
   `${sysCode}\nreturn TournamentSystem;`,
-))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem);
+))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem, ChampionData);
 
 // ── Tiny test runner ──────────────────────────────────────────
 
@@ -244,6 +252,7 @@ test('generateOpponent returns required fields', () => {
   assert(typeof opp.name === 'string' && opp.name.length > 0);
   assert(typeof opp.elo === 'number');
   assert(typeof opp.nationality === 'string');
+  assert(Object.prototype.hasOwnProperty.call(opp, 'title'));
 });
 
 test('generateOpponent elo within tournament range', () => {
@@ -253,6 +262,40 @@ test('generateOpponent elo within tournament range', () => {
     assert(opp.elo >= t.eloMin && opp.elo <= t.eloMax,
            `elo ${opp.elo} outside [${t.eloMin}, ${t.eloMax}]`);
   }
+});
+
+test('generateOpponent derives title from Elo thresholds', () => {
+  const low = TournamentSystem.generateOpponent({
+    eloMin: 1800,
+    eloMax: 1800,
+    tier: 1,
+  }, 'FR');
+  assertEq(low.elo, 1800);
+  assertEq(low.title, null);
+
+  const cm = TournamentSystem.generateOpponent({
+    eloMin: 2200,
+    eloMax: 2200,
+    tier: 4,
+  }, 'FR');
+  assertEq(cm.elo, 2200);
+  assertEq(cm.title, 'CM');
+
+  const mid = TournamentSystem.generateOpponent({
+    eloMin: 2100,
+    eloMax: 2100,
+    tier: 3,
+  }, 'FR');
+  assertEq(mid.elo, 2100);
+  assertEq(mid.title, null);
+
+  const high = TournamentSystem.generateOpponent({
+    eloMin: 2500,
+    eloMax: 2500,
+    tier: 6,
+  }, 'FR');
+  assertEq(high.elo, 2500);
+  assertEq(high.title, 'GM');
 });
 
 test('generateOpponent name has two parts', () => {
@@ -592,6 +635,41 @@ test('startTournament uses fieldSize of at least 8 even for short events', () =>
   assertEq(inst.field.length, 56);
 });
 
+test('round-robin startTournament uses rounds + 1 players and pre-generates the schedule', () => {
+  _player.elo = 2450;
+  const inst = TournamentSystem.startTournament(_samplePayload('tata_steel_challengers'));
+  assertEq(inst.pairingSystem, 'roundrobin');
+  assertEq(inst.field.length, 10);
+  assert(Array.isArray(inst.rrSchedule), 'expected rrSchedule array');
+  assertEq(inst.rrSchedule.length, 9);
+  assertEq(inst.currentPairings.length, 5);
+});
+
+console.log('\n── G.3 champions ──');
+
+test('Tier 3 startTournament injects exactly one champion into the field', () => {
+  const inst = TournamentSystem.startTournament(_samplePayload('gibraltar_masters'));
+  const champions = inst.field.filter((f) => f.isChampion);
+  assertEq(champions.length, 1);
+  assert(champions[0].elo >= 2100 && champions[0].elo <= 2450, 'champion stays in tournament Elo band');
+});
+
+test('Tier 5 startTournament injects 2..3 champions without duplicates', () => {
+  const inst = TournamentSystem.startTournament(_samplePayload('tata_steel_masters'));
+  const champions = inst.field.filter((f) => f.isChampion);
+  assert(champions.length >= 2 && champions.length <= 3, `expected 2..3 champions, got ${champions.length}`);
+  const ids = new Set(champions.map((c) => c.id));
+  assertEq(ids.size, champions.length, 'champions should be unique in a field');
+});
+
+test('startTournament emits TOURNAMENT_STARTED with champion payload when elite names are present', () => {
+  const inst = TournamentSystem.startTournament(_samplePayload('grand_swiss'));
+  const champions = inst.field.filter((f) => f.isChampion);
+  const ev = _emittedEvents.find((e) => e.eventName === GameEvents.EVENTS.TOURNAMENT_STARTED);
+  assert(ev, 'expected tournament_started emitted');
+  assertEq(ev.payload.champions.length, champions.length);
+});
+
 console.log('\n── Pairings ──');
 
 test('round 1 pairings cover the whole field', () => {
@@ -623,6 +701,105 @@ test('player is in exactly one pairing per round', () => {
     (p) => (p.white && p.white.id === 'player') || (p.black && p.black.id === 'player'),
   );
   assertEq(myPairings.length, 1);
+});
+
+console.log('\n── Round Robin ──');
+
+test('_generateRoundRobinSchedule(8) covers every pairing exactly once with balanced colors', () => {
+  const schedule = TournamentSystem._generateRoundRobinSchedule(8);
+  assertEq(schedule.length, 7);
+
+  const gamesPlayed = Array.from({ length: 8 }, () => 0);
+  const whiteCounts = Array.from({ length: 8 }, () => 0);
+  const blackCounts = Array.from({ length: 8 }, () => 0);
+  const opponents = Array.from({ length: 8 }, () => new Set());
+
+  for (const round of schedule) {
+    assertEq(round.length, 4);
+    const seenThisRound = new Set();
+    for (const pairing of round) {
+      assert(pairing.white >= 0 && pairing.white < 8, 'white index should stay in bounds');
+      assert(pairing.black >= 0 && pairing.black < 8, 'black index should stay in bounds');
+      assert(pairing.white !== pairing.black, 'no self pairing');
+      assert(!seenThisRound.has(pairing.white), 'white repeated in round');
+      assert(!seenThisRound.has(pairing.black), 'black repeated in round');
+      seenThisRound.add(pairing.white);
+      seenThisRound.add(pairing.black);
+
+      gamesPlayed[pairing.white] += 1;
+      gamesPlayed[pairing.black] += 1;
+      whiteCounts[pairing.white] += 1;
+      blackCounts[pairing.black] += 1;
+
+      assert(!opponents[pairing.white].has(pairing.black), 'duplicate opponent encountered');
+      assert(!opponents[pairing.black].has(pairing.white), 'duplicate opponent encountered');
+      opponents[pairing.white].add(pairing.black);
+      opponents[pairing.black].add(pairing.white);
+    }
+  }
+
+  for (let i = 0; i < 8; i++) {
+    assertEq(gamesPlayed[i], 7, `player ${i} should play 7 games`);
+    assertEq(opponents[i].size, 7, `player ${i} should face 7 unique opponents`);
+    assert(
+      Math.abs(whiteCounts[i] - blackCounts[i]) <= 1,
+      `player ${i} should have near-balanced colors`,
+    );
+  }
+});
+
+test('_generateRoundRobinSchedule(9) gives every player exactly one bye', () => {
+  const schedule = TournamentSystem._generateRoundRobinSchedule(9);
+  assertEq(schedule.length, 9);
+
+  const byeCounts = Array.from({ length: 9 }, () => 0);
+  const gamesPlayed = Array.from({ length: 9 }, () => 0);
+
+  for (const round of schedule) {
+    assertEq(round.length, 5);
+    const seenThisRound = new Set();
+    for (const pairing of round) {
+      assert(!seenThisRound.has(pairing.white), 'player repeated in round');
+      seenThisRound.add(pairing.white);
+
+      if (pairing.black === -1) {
+        byeCounts[pairing.white] += 1;
+        continue;
+      }
+
+      assert(!seenThisRound.has(pairing.black), 'player repeated in round');
+      seenThisRound.add(pairing.black);
+      gamesPlayed[pairing.white] += 1;
+      gamesPlayed[pairing.black] += 1;
+    }
+  }
+
+  for (let i = 0; i < 9; i++) {
+    assertEq(byeCounts[i], 1, `player ${i} should receive exactly one bye`);
+    assertEq(gamesPlayed[i], 8, `player ${i} should play 8 games`);
+  }
+});
+
+test('round-robin tournaments advance through the pre-generated schedule', () => {
+  _player.elo = 2450;
+  TournamentSystem.startTournament(_samplePayload('tata_steel_challengers'));
+  const inst1 = TournamentSystem.getCurrentInstance();
+  const round1Pairing = TournamentSystem.getCurrentPlayerPairing();
+  assert(inst1.rrSchedule && inst1.rrSchedule.length === 9, 'rrSchedule should be present');
+  assert(round1Pairing, 'player should have a round 1 pairing');
+
+  TournamentSystem.recordPlayerResult(0.5);
+
+  const inst2 = TournamentSystem.getCurrentInstance();
+  const round2Pairing = TournamentSystem.getCurrentPlayerPairing();
+  assertEq(inst2.currentRound, 2);
+  assert(round2Pairing, 'player should have a round 2 pairing');
+  if (round1Pairing.opponent && round2Pairing.opponent) {
+    assert(
+      round1Pairing.opponent.id !== round2Pairing.opponent.id,
+      'round-robin schedule should advance to a different opponent',
+    );
+  }
 });
 
 console.log('\n── getCurrentPlayerPairing ──');
@@ -911,6 +1088,53 @@ test('getStandings returns sorted by score then elo', () => {
   }
 });
 
+test('round-robin standings use Sonneborn-Berger before Elo', () => {
+  _calendarState.currentTournament = {
+    tournamentId: 'tata_steel_masters',
+    tournamentName: 'Tata Steel Masters',
+    city: 'Wijk aan Zee',
+    country: 'NL',
+    startDate: { year: 2026, month: 1, day: 17 },
+    playerEloStart: 2500,
+    rounds: 3,
+    pairingSystem: 'roundrobin',
+    daysDuration: 3,
+    entryFee: 0,
+    prizes: [1],
+    field: [
+      { id: 'player', name: 'Tester', elo: 2500, score: 2, opponentsFaced: ['opp_a', 'opp_b', 'opp_c'] },
+      { id: 'opp_a', name: 'A', elo: 2480, score: 2, opponentsFaced: ['player', 'opp_b', 'opp_c'] },
+      { id: 'opp_b', name: 'B', elo: 2600, score: 1, opponentsFaced: ['player', 'opp_a', 'opp_c'] },
+      { id: 'opp_c', name: 'C', elo: 2300, score: 1, opponentsFaced: ['player', 'opp_a', 'opp_b'] },
+    ],
+    currentRound: 4,
+    currentPairings: null,
+    rrSchedule: null,
+    history: [
+      { round: 1, results: [
+        { white: 'player', black: 'opp_a', scoreW: 1, scoreB: 0 },
+        { white: 'opp_b', black: 'opp_c', scoreW: 1, scoreB: 0 },
+      ] },
+      { round: 2, results: [
+        { white: 'player', black: 'opp_b', scoreW: 1, scoreB: 0 },
+        { white: 'opp_a', black: 'opp_c', scoreW: 1, scoreB: 0 },
+      ] },
+      { round: 3, results: [
+        { white: 'opp_c', black: 'player', scoreW: 1, scoreB: 0 },
+        { white: 'opp_a', black: 'opp_b', scoreW: 1, scoreB: 0 },
+      ] },
+    ],
+  };
+
+  const standings = TournamentSystem.getStandings();
+  assertEq(standings[0].id, 'player');
+  assertEq(standings[1].id, 'opp_a');
+  assertEq(standings[2].id, 'opp_c');
+  assertEq(standings[3].id, 'opp_b');
+  assert(standings[0].sb > standings[1].sb, 'player should lead the top tie on SB');
+  assert(standings[2].sb > standings[3].sb, 'SB should break the lower tie before Elo');
+});
+
 console.log('\n── finalize ──');
 
 test('finalize requires the tournament to be finished', () => {
@@ -1005,10 +1229,10 @@ const RivalSystem = (new Function(
 // Rebuild TournamentSystem with rivals injected so _buildRivalEntries
 // sees them.
 const TournamentSystemWithRivals = (new Function(
-  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem',
+  'TournamentData', 'CareerManager', 'CalendarSystem', 'GameEvents', 'FocusSystem', 'ChampionData',
   'RivalData', 'RivalSystem',
   `${sysCode}\nreturn TournamentSystem;`,
-))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem, RivalData, RivalSystem);
+))(TournamentData, CareerManager, CalendarSystem, GameEvents, FocusSystem, ChampionData, RivalData, RivalSystem);
 
 const RIVAL_GAME_EVENTS_KEY = 'TOURNAMENT_ROUND_FINISHED';
 GameEvents.EVENTS[RIVAL_GAME_EVENTS_KEY] = 'tournament_round_finished';

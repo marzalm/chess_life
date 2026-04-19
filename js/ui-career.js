@@ -61,7 +61,7 @@ const UICareer = (() => {
       const focusEl  = document.getElementById('career-focus');
       const moneyEl  = document.getElementById('career-money');
 
-      if (nameEl) nameEl.textContent = player.playerName || 'Player';
+      if (nameEl) nameEl.innerHTML = _formatNameHTML(player.playerName || 'Player', player.title || null);
       if (metaEl) {
         const country = (typeof CharacterCreator !== 'undefined')
           ? CharacterCreator.COUNTRIES.find((c) => c.code === player.nationality)
@@ -486,6 +486,50 @@ const UICareer = (() => {
 
   function _coachFlag(code) {
     return COUNTRY_FLAGS[code] || '🏳️';
+  }
+
+  function _formatName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatName) {
+      return CareerManager.formatName(name, title);
+    }
+    return (name || '').trim();
+  }
+
+  function _formatTitledName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitledName) {
+      return CareerManager.formatTitledName(name, title);
+    }
+    const safeName = _formatName(name, title);
+    return title ? `${title} ${safeName}` : safeName;
+  }
+
+  function _formatTitleBadgeHTML(title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitleBadgeHTML) {
+      return CareerManager.formatTitleBadgeHTML(title);
+    }
+    return title ? `<span class="title-badge title-${String(title).toLowerCase()}">${title}</span>` : '';
+  }
+
+  function _escapeHTML(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function _formatNameHTML(name, title) {
+    const badgeHTML = _formatTitleBadgeHTML(title);
+    const safeName = _escapeHTML(_formatName(name, title));
+    if (!safeName) return badgeHTML || '';
+    return badgeHTML ? `${badgeHTML} ${safeName}` : safeName;
+  }
+
+  function _formatFlaggedNameHTML(name, title, nationality) {
+    const flag = COUNTRY_FLAGS[nationality] || '';
+    const label = _formatNameHTML(name, title);
+    return flag ? `${flag} ${label}` : label;
   }
 
   function _coachDisplayName(coach) {
@@ -1114,6 +1158,7 @@ const UICareer = (() => {
     NO: '🇳🇴', PE: '🇵🇪', PH: '🇵🇭', PL: '🇵🇱', PT: '🇵🇹', RO: '🇷🇴', RU: '🇷🇺',
     RS: '🇷🇸', ES: '🇪🇸', SE: '🇸🇪', CH: '🇨🇭', TR: '🇹🇷', UA: '🇺🇦',
     GB: '🇬🇧', US: '🇺🇸', UZ: '🇺🇿', VN: '🇻🇳', AT: '🇦🇹', AD: '🇦🇩', DZ: '🇩🇿',
+    IS: '🇮🇸', SG: '🇸🇬',
   };
 
   const REASON_LABELS = {
@@ -1348,11 +1393,11 @@ const UICareer = (() => {
         const blackFlag = p.black ? (COUNTRY_FLAGS[p.black.nationality] || '') : '';
 
         const whiteLabel = p.white
-          ? `${whiteFlag} ${p.white.name} (${p.white.elo})`
+          ? `${whiteFlag} ${_formatNameHTML(p.white.name, p.white.title || null)} (${p.white.elo})`
           : '—';
         const blackLabel = p.black === null
           ? 'BYE'
-          : `${blackFlag} ${p.black.name} (${p.black.elo})`;
+          : `${blackFlag} ${_formatNameHTML(p.black.name, p.black.title || null)} (${p.black.elo})`;
 
         div.innerHTML = `
           <span class="t-pr-num">${i + 1}.</span>
@@ -1400,10 +1445,17 @@ const UICareer = (() => {
       const me = inst.field.find((p) => p.id === 'player');
       const youNameEl = document.getElementById('t-you-name');
       const youEloEl  = document.getElementById('t-you-elo');
-      if (youNameEl) youNameEl.textContent = me.name;
+      if (youNameEl) {
+        const player = CareerManager.player.get();
+        youNameEl.innerHTML = _formatNameHTML(
+          player.playerName || (me ? me.name : 'You'),
+          player.title || (me ? me.title : null),
+        );
+      }
       if (youEloEl)  youEloEl.textContent  = String(me.elo);
 
       const oppNameEl = document.getElementById('t-opp-name');
+      const oppTagEl  = document.getElementById('t-opp-tagline');
       const oppEloEl  = document.getElementById('t-opp-elo');
       const colorEl   = document.getElementById('t-color');
       const playBtn   = document.getElementById('btn-play-round');
@@ -1411,6 +1463,10 @@ const UICareer = (() => {
 
       if (pairing.color === 'bye') {
         if (oppNameEl) oppNameEl.textContent = '— BYE —';
+        if (oppTagEl) {
+          oppTagEl.textContent = '';
+          oppTagEl.classList.add('hidden');
+        }
         if (oppEloEl)  oppEloEl.textContent  = '';
         if (colorEl) {
           colorEl.textContent = 'BYE';
@@ -1419,8 +1475,18 @@ const UICareer = (() => {
         if (playBtn) playBtn.textContent = '▶ Take the bye (+1)';
         if (simBtn)  simBtn.textContent  = '⏩ Take the bye';
       } else {
-        const flag = COUNTRY_FLAGS[pairing.opponent.nationality] || '';
-        if (oppNameEl) oppNameEl.textContent = `${flag} ${pairing.opponent.name}`;
+        if (oppNameEl) {
+          oppNameEl.innerHTML = _formatFlaggedNameHTML(
+            pairing.opponent.name,
+            pairing.opponent.title || null,
+            pairing.opponent.nationality,
+          );
+        }
+        if (oppTagEl) {
+          const tagline = pairing.opponent.isChampion ? (pairing.opponent.tagline || '') : '';
+          oppTagEl.textContent = tagline;
+          oppTagEl.classList.toggle('hidden', !tagline);
+        }
         if (oppEloEl)  oppEloEl.textContent  = String(pairing.opponent.elo);
         if (colorEl) {
           const c = pairing.color;
@@ -1466,10 +1532,14 @@ const UICareer = (() => {
     _appendStandingRow(listEl, row) {
       const div = document.createElement('div');
       div.className = 't-standings-row' + (row.id === 'player' ? ' player' : '');
+      const player = row.id === 'player' ? CareerManager.player.get() : null;
       const flag = COUNTRY_FLAGS[row.nationality] || '';
+      const displayName = row.id === 'player'
+        ? _formatNameHTML(player.playerName || row.name, player.title || row.title || null)
+        : _formatNameHTML(row.name, row.title || null);
       div.innerHTML = `
         <span class="t-st-rank">${row.rank}.</span>
-        <span class="t-st-name">${flag} ${row.name}</span>
+        <span class="t-st-name">${flag} ${displayName}</span>
         <span class="t-st-elo">${row.elo}</span>
         <span class="t-st-score">${row.score}</span>
       `;
@@ -1512,7 +1582,7 @@ const UICareer = (() => {
         const oppFlag = opp ? (COUNTRY_FLAGS[opp.nationality] || '') : '';
         const oppLabel = isBye
           ? '— BYE —'
-          : (opp ? `${oppFlag} ${opp.name} (${opp.elo})` : '?');
+          : (opp ? `${oppFlag} ${_formatNameHTML(opp.name, opp.title || null)} (${opp.elo})` : '?');
 
         let cls, label;
         if (isBye)           { cls = 'bye';  label = '+1'; }
@@ -1545,11 +1615,23 @@ const UICareer = (() => {
       }
 
       // Hand off to the chess board
+      const inst = TournamentSystem.getCurrentInstance();
+      const t = inst ? TournamentData.getById(inst.tournamentId) : null;
       UIManager.setOpponent({
         name:        pairing.opponent.name,
         elo:         pairing.opponent.elo,
+        title:       pairing.opponent.title || null,
         id:          pairing.opponent.id,
         nationality: pairing.opponent.nationality,
+        tier:        t && Number.isFinite(t.tier) ? t.tier : null,
+        champion:    pairing.opponent.isChampion ? {
+          id:               pairing.opponent.id,
+          name:             pairing.opponent.name,
+          title:            pairing.opponent.title || null,
+          tagline:          pairing.opponent.tagline || '',
+          portraitSeed:     pairing.opponent.portraitSeed || null,
+          openingRepertoire: pairing.opponent.openingRepertoire || null,
+        } : null,
       });
       _showScreen('game');
       UIManager.newGame(pairing.color);
@@ -1606,7 +1688,7 @@ const UICareer = (() => {
       if (summary.source === 'bye') return `R${round}: bye (+1)`;
 
       const opp = summary.opponent
-        ? `${summary.opponent.name}, ${summary.opponent.elo}`
+        ? `${_formatTitledName(summary.opponent.name, summary.opponent.title || null)}, ${summary.opponent.elo}`
         : 'unknown opponent';
       const resultLabel = summary.result === 'win'
         ? '+1'
@@ -1692,8 +1774,7 @@ const UICareer = (() => {
 
         const nameRow = document.createElement('div');
         nameRow.className = 'rival-name';
-        const flag = COUNTRY_FLAGS[proto.nationality] || '🏳️';
-        nameRow.textContent = `${flag} ${proto.name}`;
+        nameRow.innerHTML = _formatFlaggedNameHTML(proto.name, r.title || null, proto.nationality);
 
         const statRow = document.createElement('div');
         statRow.className = 'rival-stat-row';

@@ -43,6 +43,26 @@ const InboxSystem = (() => {
     return n > 0 ? `+${n}` : String(n);
   }
 
+  function _formatName(name, title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.formatTitledName) {
+      return CareerManager.formatTitledName(name, title);
+    }
+    return title ? `${title} ${name}` : name;
+  }
+
+  function _titleFullName(title) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.titleFullName) {
+      return CareerManager.titleFullName(title);
+    }
+    const fallback = {
+      CM: 'Candidate Master',
+      FM: 'FIDE Master',
+      IM: 'International Master',
+      GM: 'Grandmaster',
+    };
+    return fallback[title] || String(title || '');
+  }
+
   function _getCoach(coachId) {
     if (typeof CoachData === 'undefined' || !Array.isArray(CoachData)) return null;
     return CoachData.find((coach) => coach.id === coachId) || null;
@@ -56,7 +76,7 @@ const InboxSystem = (() => {
         : (summary.rank <= 3 ? 'press_tournament_top3' : 'press_tournament_disappointing');
 
       InboxSystem.push(templateId, {
-        playerName: player.playerName,
+        playerName: _formatName(player.playerName, player.title || null),
         tournamentName: summary.tournamentName,
         city: summary.city,
         country: summary.country,
@@ -77,7 +97,7 @@ const InboxSystem = (() => {
       const delta = eloAfter - eloBefore;
 
       InboxSystem.push('federation_elo_confirmation', {
-        playerName: player.playerName,
+        playerName: _formatName(player.playerName, player.title || null),
         elo: eloAfter,
         deltaSigned: _formatSignedInt(delta),
       });
@@ -103,6 +123,32 @@ const InboxSystem = (() => {
       InboxSystem.push(templateId, {
         coachName: coach ? `${coach.title} ${coach.name}` : 'Your coach',
         weeklyCost: coach ? coach.weeklyCost : '???',
+      });
+    });
+  }
+
+  function _scheduleChampionFieldMail(payload) {
+    queueMicrotask(() => {
+      const champions = Array.isArray(payload && payload.champions)
+        ? payload.champions
+        : [];
+      if (champions.length === 0) return;
+
+      InboxSystem.push('champion_in_field', {
+        tournamentName: payload.tournamentName || 'the tournament',
+        championNames: champions.map((c) => `${_formatName(c.name, c.title || null)} (${c.elo})`).join(', '),
+        verb: champions.length === 1 ? 'is' : 'are',
+      });
+    });
+  }
+
+  function _scheduleTitleEarnedMail(payload) {
+    queueMicrotask(() => {
+      const title = payload && payload.title ? payload.title : null;
+      if (!title) return;
+      InboxSystem.push('title_earned', {
+        title,
+        titleFull: _titleFullName(title),
       });
     });
   }
@@ -137,10 +183,10 @@ const InboxSystem = (() => {
       if (!payload || !payload.opponent) return;
       const player = CareerManager.player.get();
       InboxSystem.push('round_press_player_result', {
-        playerName:     player.playerName || 'Player',
+        playerName:     _formatName(player.playerName || 'Player', player.title || null),
         round:          payload.round,
         tournamentName: payload.tournamentName || 'the tournament',
-        opponentName:   payload.opponent.name || 'their opponent',
+        opponentName:   _formatName(payload.opponent.name || 'their opponent', payload.opponent.title || null),
         opponentElo:    payload.opponent.elo || '?',
         resultPhrase:   _resultPhrase(payload.playerResult),
         flavor:         _pressFlavor(payload.playerResult),
@@ -160,9 +206,9 @@ const InboxSystem = (() => {
       queueMicrotask(() => {
         InboxSystem.push('rival_round_watch', {
           round:          payload.round,
-          rivalName:      r.name,
+          rivalName:      _formatName(r.name, r.title || null),
           rivalVerb:      _rivalVerbFromResult(r.result),
-          opponentName:   r.opponentName,
+          opponentName:   _formatName(r.opponentName, r.opponentTitle || null),
           tournamentName: payload.tournamentName || 'the tournament',
         });
       });
@@ -183,6 +229,20 @@ const InboxSystem = (() => {
         GameEvents.EVENTS.TOURNAMENT_FINISHED,
         (summary) => _scheduleFederationMail(summary),
       );
+
+      if (GameEvents.EVENTS.TOURNAMENT_STARTED) {
+        GameEvents.on(
+          GameEvents.EVENTS.TOURNAMENT_STARTED,
+          (payload) => _scheduleChampionFieldMail(payload),
+        );
+      }
+
+      if (GameEvents.EVENTS.TITLE_EARNED) {
+        GameEvents.on(
+          GameEvents.EVENTS.TITLE_EARNED,
+          (payload) => _scheduleTitleEarnedMail(payload),
+        );
+      }
 
       GameEvents.on(
         GameEvents.EVENTS.COACH_HIRED,

@@ -156,6 +156,13 @@ test('getById returns a clone of the rival', () => {
   assert(RivalSystem.getById(id).elo !== 0, 'live elo untouched');
 });
 
+test('getById derives a title from the rival Elo', () => {
+  const id = RivalData.getAll()[0].id;
+  const live = CareerManager._rawState().rivals.find((r) => r.id === id);
+  live.elo = 2500;
+  assertEq(RivalSystem.getById(id).title, 'GM');
+});
+
 test('getNearestToPlayer returns closest by |elo - playerElo|', () => {
   const nearest = RivalSystem.getNearestToPlayer(1500, 3);
   assertEq(nearest.length, 3, 'three returned');
@@ -214,6 +221,15 @@ test('recordEncounter: player loss increments rival wins and raises rival Elo', 
   assertEq(RivalSystem.getById(id).headToHead.wins, 1);
   assert(out.delta >= 0, 'rival Elo increased or unchanged');
   assertEq(RivalSystem.getById(id).elo, before + out.delta);
+});
+
+test('derived rival title updates after Elo changes', () => {
+  const id = RivalData.getAll()[0].id;
+  const live = CareerManager._rawState().rivals.find((r) => r.id === id);
+  live.elo = 2390;
+  assertEq(RivalSystem.getById(id).title, 'FM');
+  live.elo = 2405;
+  assertEq(RivalSystem.getById(id).title, 'IM');
 });
 
 test('recordEncounter: draw bumps draws counter', () => {

@@ -48,7 +48,7 @@ Calendrier annuel réaliste en référence : Tata Steel (janvier), Candidats (av
 ## Adversaires et IA
 
 - **Maia-2 (ONNX)** — déjà intégré, 11 tranches Elo de <1100 à ≥2000. C'est le cerveau des adversaires jusqu'à ~2000 Elo, là où Maia-2 donne des coups humains réalistes.
-- **Stockfish (WASM)** — déjà intégré comme Worker unique pour les évaluations (système Focus). Au-delà de ~2000 Elo, les adversaires passeront à du Stockfish avec skill level limité + bruit, pour simuler le jeu des pros. Cette transition sera implémentée plus tard (Phase G).
+- **Stockfish (WASM)** — déjà intégré comme Worker unique pour les évaluations (système Focus). **Phase G.2 est maintenant livrée** : au-delà de ~2000 Elo effectif, les adversaires passent à un Stockfish humanisé (MultiPV + softmax + température), toujours via ce **même Worker unique**.
 - Un adversaire = un nom, une nationalité, un Elo, un portrait pixel art, un style, et quelques lignes de dialogue pré/post-partie.
 - Des **rivaux PNJ nommés** progresseront en parallèle au joueur, avec leur propre courbe Elo, et interagiront via l'inbox.
 
@@ -220,7 +220,15 @@ Le nombre de moves Stockfish accordés suit cette base :
 `rival-data.js` (8 rivaux nommés, Elo 950–2200, archetypes rising/steady/declining/volatile) + `rival-system.js` (persistence, H2H, relation dérivée, drift offscreen hebdomadaire, co-registration 50%+10% heated avec mail de provocation à J-3). `TournamentSystem` injecte 1–3 rivaux par tournoi, émet `tournament_round_finished`, et applique un **soft pairing bias** au dernier round si joueur et rival met sont tous deux top-4 à ≤1 point d'écart. L'inbox est désormais accessible pendant les tournois (bouton dédié avec badge) et réagit via 3 templates : `round_press_player_result`, `rival_round_watch`, `rival_provocation_before_tournament`. Écran `🎭 Rivals` minimal avec portraits placeholder (initiales + hue hashée), Elo, H2H, relation, et tri Elo/proximité. 332 tests verts. Voir [CHANGELOG.md](CHANGELOG.md).
 
 **Phase G — Tiers 3 à 6 et cycle mondial**
-Ajout des tournois Tier 3 (opens internationaux), Tier 4 (fermés), Tier 5 (élite), Tier 6 (cycle Candidats → Championnat du Monde). Transition Maia → Stockfish pour les adversaires au-delà de 2000 Elo. Le joueur peut atteindre et gagner le Championnat du Monde.
+Ajout des tournois Tier 3 (opens internationaux), Tier 4 (fermés), Tier 5 (élite), Tier 6 (cycle Candidats → Championnat du Monde). **G.1 et G.2 sont déjà livrées** :
+
+- **G.1 ✅** — système de difficulté global avec `effectiveOpponentElo(playerElo, displayedElo, difficulty, tier?)`, helper de suggestion dans le character creator, persistance de `player.settings.difficulty`
+- **G.2 ✅** — adversaires Stockfish humanisés au-dessus du plafond Maia (`> 2000` Elo effectif), routage live Maia/Stockfish dans `UIManager`, garde du Worker unique avec drain `stop + isready/readyok`, et outil de dev `🛠 Dev panel` pour lancer des parties hors catalogue
+
+Reste à faire dans la Phase G :
+
+- **G.3** — personnalités élite / champions nommés (biais d'ouverture, tiny temperature offsets, flavor inbox/dialogue)
+- **G.4** — tuning / calibration (caps de difficulté, températures Stockfish, movetimes, seuils Focus, décision éventuelle sur la suppression de `easy/normal`)
 
 **Phase H — Polish, pédagogie et PWA**
 Sons, animations, écran titre, responsive, PWA offline, déploiement GitHub Pages. **Pédagogie assumée** : renforcement de la revue post-partie, éventuels puzzles tactiques entre tournois, drills d'ouverture. C'est ici que l'aspect « trainer caché » se manifeste explicitement.
@@ -347,6 +355,18 @@ Exemples : variables `playerName` pas `nomJoueur`, fichier `tournament-data.js` 
   - Phase G (Tier 4+) : envisager des facteurs `easy/normal` légèrement
     plus stricts (0.50 / 0.75) pour éviter que l'aide devienne trop
     généreuse dans les tournois élite — ajustable par tier.
+
+- **Seuil Focus adaptatif sur l'Elo effectif adverse** *(shipped, 2026-04-17)* :
+  le seuil "bon coup" de `focus-system.js` ne se base plus sur
+  l'Elo affiché de l'adversaire mais sur son **Elo effectif** via
+  `UIManager.getEffectiveOpponentElo()`. Cela évite un désalignement
+  où l'IA pouvait jouer à une force dampened (`easy` / `normal`) alors
+  que le Focus jugeait encore le joueur comme si l'adversaire jouait
+  à l'Elo catalogue. Le seuil combine maintenant :
+  - une base par Elo joueur (`100 / 90 / 75 / 65 / 55 / 45 cp`)
+  - une pénalité supplémentaire si l'adversaire effectif est plus fort
+  - un effet plus marqué à haut Elo
+  - un floor absolu à `15cp`
 
 - **Form rating / bonus temporaire après coaching** *(noté en C.4, 2026-04-10)*
   L'idée du joueur : "quand je gagne de l'Elo via coaching, les adversaires

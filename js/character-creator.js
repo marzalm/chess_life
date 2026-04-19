@@ -247,6 +247,7 @@ const CharacterCreator = (() => {
       nationality: _draft.nationality,
       gender:      _draft.gender,
       avatar:      AvatarData.normalize(_draft.avatar),
+      settings:    { difficulty: 'realistic' },
     });
 
     if (typeof SoundManager !== 'undefined') SoundManager.playFlowEnter(2);

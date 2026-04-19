@@ -50,6 +50,10 @@ function assertEq(actual, expected, msg) {
 
 console.log('\n── Basic pub/sub ──');
 
+test('EVENTS exposes TITLE_EARNED', () => {
+  assertEq(GameEvents.EVENTS.TITLE_EARNED, 'title_earned');
+});
+
 test('on + emit calls handler with payload', () => {
   let seen = null;
   GameEvents.on(GameEvents.EVENTS.GAME_ENDED, (payload) => { seen = payload; });

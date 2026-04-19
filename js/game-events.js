@@ -7,6 +7,7 @@
 //
 // Source of truth for event names and payloads:
 //   TOURNAMENT_FINISHED = 'tournament_finished' // { tournamentId, tournamentName, city, country, startDate, rounds, rank, of, score, prize, eloBefore, eloAfter, date }
+//   TOURNAMENT_STARTED  = 'tournament_started'  // { tournamentId, tournamentName, city, country, champions: Array<{ id, name, elo, nationality, tagline }> }
 //   ROUND_PLAYED        = 'round_played'        // { tournamentId, round, opponent, result, score, source }
 //   GAME_ENDED          = 'game_ended'          // { result: 'win'|'draw'|'loss', mode: 'free'|'tournament', opponentId?, opponentElo? }
 //   ELO_CHANGED         = 'elo_changed'         // { before, after, delta, source, opponentElo? }
@@ -16,6 +17,7 @@
 //   FLOW_BONUS_EARNED   = 'flow_bonus_earned'   // { flowPalier }
 //   COACH_HIRED         = 'coach_hired'         // { coachId, weeklyCost, eloUnlock }
 //   COACH_FIRED         = 'coach_fired'         // { coachId, reason: 'manual'|'cant_afford' }
+//   TITLE_EARNED        = 'title_earned'        // { title: 'CM'|'FM'|'IM'|'GM' }
 //   TOURNAMENT_ROUND_FINISHED = 'tournament_round_finished'
 //     // { tournamentId, tournamentName, round, opponent, playerResult,
 //     //   notableResults: Array<{ rivalId, name, opponentId, opponentName, result }>,
@@ -30,6 +32,7 @@ const GameEvents = (() => {
 
   const EVENTS = {
     TOURNAMENT_FINISHED: 'tournament_finished',
+    TOURNAMENT_STARTED:  'tournament_started',
     ROUND_PLAYED:        'round_played',
     GAME_ENDED:          'game_ended',
     ELO_CHANGED:         'elo_changed',
@@ -39,6 +42,7 @@ const GameEvents = (() => {
     FLOW_BONUS_EARNED:   'flow_bonus_earned',
     COACH_HIRED:         'coach_hired',
     COACH_FIRED:         'coach_fired',
+    TITLE_EARNED:        'title_earned',
     TOURNAMENT_ROUND_FINISHED: 'tournament_round_finished',
   };
 

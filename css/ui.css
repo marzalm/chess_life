@@ -103,6 +103,46 @@
   text-overflow: ellipsis;
 }
 
+.title-badge {
+  display: inline-block;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 5px;
+  white-space: nowrap;
+}
+
+.title-cm {
+  background: #3a6e3a;
+  color: #ffffff;
+}
+
+.title-fm {
+  background: #c9a227;
+  color: #111111;
+}
+
+.title-im {
+  background: #d4742c;
+  color: #ffffff;
+}
+
+.title-gm {
+  background: #b83232;
+  color: #ffffff;
+}
+
+.game-id-tagline {
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  line-height: 1.1;
+  color: var(--px-accent);
+  margin-top: 4px;
+}
+
 #player-elo,
 #opponent-elo {
   font-family: 'Press Start 2P', monospace;
@@ -1469,6 +1509,42 @@ body.playback-locked #board-container {
   color: #f0c0d0;
 }
 #btn-takeback:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#btn-offer-draw {
+  margin-top: 6px;
+  background: #1f3443;
+  border-color: #4a7d99;
+  color: #b8dff6;
+}
+
+#btn-offer-draw:hover:not(:disabled) {
+  background: #28485d;
+  border-color: #5f99b8;
+  color: #d7efff;
+}
+
+#btn-offer-draw:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#btn-resign {
+  margin-top: 6px;
+  background: #3e1717;
+  border-color: #8e4040;
+  color: #f2b4b4;
+}
+
+#btn-resign:hover:not(:disabled) {
+  background: #552020;
+  border-color: #b25454;
+  color: #ffd2d2;
+}
+
+#btn-resign:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

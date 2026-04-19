@@ -19,9 +19,10 @@
 //   - When the player consumes a `tournament_start` event, build the
 //     full field of opponents and persist it as
 //     CareerManager.calendar.currentTournament.
-//   - Pair each round with a simplified Swiss algorithm
+//   - Pair each round either with a simplified Swiss algorithm
 //     (score group → top half vs bottom half, no rematch, byes for
-//     the leftover odd player).
+//     the leftover odd player) or with a pre-generated round-robin
+//     schedule for closed elite events.
 //   - Let the player play their game on the existing chess board
 //     (the actual UI integration lives in C.3); record the result
 //     and simulate every other pairing's result with an Elo-based
@@ -163,6 +164,17 @@ const TournamentSystem = (() => {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
+  function _shuffle(arr) {
+    const out = arr.slice();
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    return out;
+  }
+
   /**
    * Prefer the richer NamePools module when loaded. Fall back to
    * the small in-module NAMES table otherwise.
@@ -188,6 +200,15 @@ const TournamentSystem = (() => {
   function _randomInternationalCountry() {
     const pool = _getAvailableCountries();
     return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function _visitorChanceForTournament(tournament) {
+    if (tournament.tier <= 1) return 0.10;
+    if (tournament.tier === 2) return 0.40;
+    if (tournament.tier === 3) return 0.65;
+    if (tournament.tier === 4) return 0.78;
+    if (tournament.tier === 5) return 0.88;
+    return 0.94;
   }
 
   /**
@@ -291,9 +312,9 @@ const TournamentSystem = (() => {
      * @param {string} hostCountry resolved country of the tournament
      */
     generateOpponent(tournament, hostCountry) {
-      // Tier 1 home events: 90% locals, 10% visitors.
-      // Tier 2 international opens: 60% host country, 40% visitors.
-      const visitorChance = tournament.tier === 1 ? 0.10 : 0.40;
+      // Lower tiers are mostly local. Higher tiers become sharply more
+      // international, with only a small host-country slice surviving.
+      const visitorChance = _visitorChanceForTournament(tournament);
       const isVisitor = Math.random() < visitorChance;
       const country = isVisitor ? _randomInternationalCountry() : hostCountry;
 
@@ -311,6 +332,7 @@ const TournamentSystem = (() => {
         id:          'opp_' + Math.random().toString(36).slice(2, 10),
         name:        `${first} ${last}`,
         elo,
+        title:       _titleForElo(elo),
         nationality: country,
       };
     },
@@ -515,9 +537,7 @@ const TournamentSystem = (() => {
       // for fixed-location ones it's the catalogue country.
       const hostCountry = payload.country || _resolveTournament(t).country;
 
-      // Build the field. Target ~8 players per round to give a
-      // reasonable Swiss pool (e.g. 5 rounds → 40 players, 9 → 72).
-      const fieldSize = Math.max(8, t.rounds * 8);
+      const fieldSize = _fieldSizeForTournament(t);
 
       const field = [_buildPlayerEntry(player)];
       const usedNames = new Set();
@@ -527,6 +547,14 @@ const TournamentSystem = (() => {
       // We inject BEFORE generic opponents so their names reserve slots.
       const rivalEntries = _buildRivalEntries(t, CalendarSystem.getDate());
       for (const entry of rivalEntries) {
+        if (field.length >= fieldSize) break;
+        field.push(entry);
+        usedNames.add(entry.name);
+      }
+
+      const championEntries = _buildChampionEntries(t);
+      for (const entry of championEntries) {
+        if (field.length >= fieldSize) break;
         field.push(entry);
         usedNames.add(entry.name);
       }
@@ -555,12 +583,16 @@ const TournamentSystem = (() => {
         startDate:       _cloneDate(CalendarSystem.getDate()),
         playerEloStart:  player.elo,
         rounds:          t.rounds,
+        pairingSystem:   t.pairingSystem || 'swiss',
         daysDuration:    t.daysDuration,
         entryFee:        t.entryFee,
         prizes:          [...t.prizes],
         field,
         currentRound:    1,
         currentPairings: null,
+        rrSchedule:      t.pairingSystem === 'roundrobin'
+          ? _generateRoundRobinSchedule(field.length)
+          : null,
         history:         [],
       };
 
@@ -572,6 +604,23 @@ const TournamentSystem = (() => {
       cal.phase             = 'in_tournament';
       cal.currentEvent      = null;
       CareerManager.save();
+
+      if (typeof GameEvents !== 'undefined' && GameEvents.EVENTS && GameEvents.EVENTS.TOURNAMENT_STARTED) {
+        GameEvents.emit(GameEvents.EVENTS.TOURNAMENT_STARTED, {
+          tournamentId:   instance.tournamentId,
+          tournamentName: instance.tournamentName,
+          city:           instance.city,
+          country:        instance.country,
+          champions: championEntries.map((entry) => ({
+            id:          entry.id,
+            name:        entry.name,
+            elo:         entry.elo,
+            title:       entry.title || _titleForElo(entry.elo),
+            nationality: entry.nationality,
+            tagline:     entry.tagline || '',
+          })),
+        });
+      }
 
       return instance;
     },
@@ -632,7 +681,9 @@ const TournamentSystem = (() => {
             id:          pairing.opponent.id,
             name:        pairing.opponent.name,
             elo:         pairing.opponent.elo,
+            title:       pairing.opponent.title || _titleForElo(pairing.opponent.elo),
             nationality: pairing.opponent.nationality,
+            champion:    pairing.opponent.isChampion ? _buildChampionPayload(pairing.opponent) : null,
           }
         : null;
       const result = _scoreToResult(playerScore, source === 'bye');
@@ -777,11 +828,23 @@ const TournamentSystem = (() => {
     getStandings() {
       const inst = this.getCurrentInstance();
       if (!inst) return [];
+      const sbScores = inst.pairingSystem === 'roundrobin'
+        ? _getRoundRobinSonnebornBergerMap(inst)
+        : null;
       const sorted = [...inst.field].sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
+        if (sbScores) {
+          const sbA = sbScores.get(a.id) || 0;
+          const sbB = sbScores.get(b.id) || 0;
+          if (sbB !== sbA) return sbB - sbA;
+        }
         return b.elo - a.elo;
       });
-      return sorted.map((p, i) => ({ ...p, rank: i + 1 }));
+      return sorted.map((p, i) => ({
+        ...p,
+        sb: sbScores ? (sbScores.get(p.id) || 0) : null,
+        rank: i + 1,
+      }));
     },
 
     /**
@@ -897,12 +960,34 @@ const TournamentSystem = (() => {
       };
     },
 
+    _generateRoundRobinSchedule(fieldSize) {
+      return _generateRoundRobinSchedule(fieldSize);
+    },
+
   };
 
   // ── Internal helpers (C.2b) ────────────────────────────────
 
   function _cloneDate(d) {
     return { year: d.year, month: d.month, day: d.day };
+  }
+
+  function _titleForElo(elo) {
+    if (typeof CareerManager !== 'undefined' && CareerManager.titleForElo) {
+      return CareerManager.titleForElo(elo);
+    }
+    if (elo >= 2500) return 'GM';
+    if (elo >= 2400) return 'IM';
+    if (elo >= 2300) return 'FM';
+    if (elo >= 2200) return 'CM';
+    return null;
+  }
+
+  function _fieldSizeForTournament(tournament) {
+    if (tournament && tournament.pairingSystem === 'roundrobin') {
+      return Math.max(2, (tournament.rounds || 0) + 1);
+    }
+    return Math.max(8, (tournament.rounds || 0) * 8);
   }
 
   /**
@@ -919,6 +1004,7 @@ const TournamentSystem = (() => {
       id:             'player',
       name:           player.playerName || 'You',
       elo:            player.elo,
+      title:          player.title || _titleForElo(player.elo),
       nationality:    player.nationality || '',
       isPlayer:       true,
       score:          0,
@@ -931,11 +1017,27 @@ const TournamentSystem = (() => {
       id:             opp.id,
       name:           opp.name,
       elo:            opp.elo,
+      title:          opp.title || _titleForElo(opp.elo),
       nationality:    opp.nationality,
       isPlayer:       false,
-      isRival:        false,
+      isRival:        Boolean(opp.isRival),
+      isChampion:     Boolean(opp.isChampion),
+      tagline:        opp.tagline || '',
+      portraitSeed:   opp.portraitSeed || null,
+      openingRepertoire: opp.openingRepertoire || null,
       score:          0,
       opponentsFaced: [],
+    };
+  }
+
+  function _buildChampionPayload(entry) {
+    return {
+      id:           entry.id,
+      name:         entry.name,
+      title:        entry.title || _titleForElo(entry.elo),
+      tagline:      entry.tagline || '',
+      portraitSeed: entry.portraitSeed || null,
+      openingRepertoire: entry.openingRepertoire || null,
     };
   }
 
@@ -968,8 +1070,10 @@ const TournamentSystem = (() => {
         out.push({
           rivalId:      whiteId,
           name:         whiteEntry.name,
+          title:        whiteEntry.title || _titleForElo(whiteEntry.elo),
           opponentId:   blackId,
           opponentName: blackEntry.name,
+          opponentTitle: blackEntry.title || _titleForElo(blackEntry.elo),
           result:       res,
         });
       }
@@ -978,8 +1082,10 @@ const TournamentSystem = (() => {
         out.push({
           rivalId:      blackId,
           name:         blackEntry.name,
+          title:        blackEntry.title || _titleForElo(blackEntry.elo),
           opponentId:   whiteId,
           opponentName: whiteEntry.name,
+          opponentTitle: whiteEntry.title || _titleForElo(whiteEntry.elo),
           result:       res,
         });
       }
@@ -1032,6 +1138,7 @@ const TournamentSystem = (() => {
         id:             live.id,
         name:           proto.name,
         elo:            live.elo,
+        title:          _titleForElo(live.elo),
         nationality:    proto.nationality,
         isPlayer:       false,
         isRival:        true,
@@ -1040,6 +1147,39 @@ const TournamentSystem = (() => {
       });
     }
     return out;
+  }
+
+  function _championTargetForTier(tier, poolSize) {
+    if (poolSize <= 0) return 0;
+    if (tier === 3) return 1;
+    if (tier === 4) return Math.min(poolSize, 1 + Math.floor(Math.random() * 2));
+    if (tier >= 5) return Math.min(poolSize, 2 + Math.floor(Math.random() * 2));
+    return 0;
+  }
+
+  function _buildChampionEntries(t) {
+    if (t.tier < 3) return [];
+    if (typeof ChampionData === 'undefined' || !ChampionData.getByEloRange) {
+      return [];
+    }
+
+    const pool = ChampionData.getByEloRange(t.eloMin, t.eloMax);
+    if (pool.length === 0) return [];
+
+    const target = _championTargetForTier(t.tier, pool.length);
+    const selected = _shuffle(pool).slice(0, target);
+
+    return selected.map((champion) => _buildOpponentEntry({
+      id:             champion.id,
+      name:           champion.name,
+      elo:            champion.elo,
+      title:          _titleForElo(champion.elo),
+      nationality:    champion.nationality,
+      isChampion:     true,
+      tagline:        champion.tagline,
+      portraitSeed:   champion.portraitSeed,
+      openingRepertoire: champion.openingRepertoire || null,
+    }));
   }
 
   function _addScore(entry, delta) {
@@ -1068,6 +1208,104 @@ const TournamentSystem = (() => {
     a.opponentsFaced.push(b.id);
   }
 
+  function _generateRoundRobinSchedule(fieldSize) {
+    if (!Number.isInteger(fieldSize) || fieldSize < 2) {
+      throw new Error(`[Tournament] Invalid round-robin field size: ${fieldSize}`);
+    }
+
+    const hasBye = fieldSize % 2 === 1;
+    const ring = [];
+    for (let i = 0; i < fieldSize; i++) ring.push(i);
+    if (hasBye) ring.push(-1);
+
+    const rounds = [];
+    const slots = ring.length;
+    const boardsPerRound = slots / 2;
+    const whiteCounts = Array.from({ length: fieldSize }, () => 0);
+    const blackCounts = Array.from({ length: fieldSize }, () => 0);
+    let order = ring.slice();
+
+    for (let round = 0; round < slots - 1; round++) {
+      const pairings = [];
+      for (let board = 0; board < boardsPerRound; board++) {
+        const left = order[board];
+        const right = order[slots - 1 - board];
+
+        if (left === -1 || right === -1) {
+          const playerIndex = left === -1 ? right : left;
+          pairings.push({ white: playerIndex, black: -1 });
+          continue;
+        }
+
+        const forwardCost =
+          Math.abs((whiteCounts[left] + 1) - blackCounts[left]) +
+          Math.abs(whiteCounts[right] - (blackCounts[right] + 1));
+        const reverseCost =
+          Math.abs((whiteCounts[right] + 1) - blackCounts[right]) +
+          Math.abs(whiteCounts[left] - (blackCounts[left] + 1));
+
+        let white = left;
+        let black = right;
+        if (reverseCost < forwardCost || (reverseCost === forwardCost && (round + board) % 2 === 1)) {
+          white = right;
+          black = left;
+        }
+
+        whiteCounts[white] += 1;
+        blackCounts[black] += 1;
+
+        pairings.push({ white, black });
+      }
+
+      rounds.push(pairings);
+      order = [order[0], order[slots - 1], ...order.slice(1, slots - 1)];
+    }
+
+    return rounds;
+  }
+
+  function _pairRoundRobin(instance) {
+    const roundIndex = (instance.currentRound || 1) - 1;
+    const round = instance.rrSchedule && instance.rrSchedule[roundIndex];
+    if (!round) return [];
+    return round.map((pairing) => ({
+      white: pairing.white === -1 ? null : instance.field[pairing.white] || null,
+      black: pairing.black === -1 ? null : instance.field[pairing.black] || null,
+    }));
+  }
+
+  function _getRoundRobinSonnebornBergerMap(instance) {
+    const finalScores = new Map(
+      instance.field.map((entry) => [entry.id, entry.score || 0]),
+    );
+    const sbScores = new Map(
+      instance.field.map((entry) => [entry.id, 0]),
+    );
+
+    for (const round of instance.history || []) {
+      for (const result of round.results || []) {
+        if (result.black === null) continue;
+
+        const whiteOpponentScore = finalScores.get(result.black) || 0;
+        const blackOpponentScore = finalScores.get(result.white) || 0;
+
+        if (result.scoreW === 1) {
+          sbScores.set(result.white, (sbScores.get(result.white) || 0) + whiteOpponentScore);
+        } else if (result.scoreW === 0.5) {
+          sbScores.set(result.white, (sbScores.get(result.white) || 0) + (whiteOpponentScore / 2));
+        }
+
+        if (result.scoreB === 1) {
+          sbScores.set(result.black, (sbScores.get(result.black) || 0) + blackOpponentScore);
+        } else if (result.scoreB === 0.5) {
+          sbScores.set(result.black, (sbScores.get(result.black) || 0) + (blackOpponentScore / 2));
+        }
+      }
+    }
+
+    return sbScores;
+  }
+
   /**
    * Simplified Swiss pairings for the next round of a tournament.
    *
@@ -1082,6 +1320,10 @@ const TournamentSystem = (() => {
    * rounds is deferred to a later refinement.
    */
   function _pairRound(instance) {
+    if (instance.pairingSystem === 'roundrobin') {
+      return _pairRoundRobin(instance);
+    }
+
     const sorted = [...instance.field].sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return b.elo - a.elo;
